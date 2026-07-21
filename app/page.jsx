@@ -83,16 +83,39 @@ export default function Home() {
     });
   };
 
+  // Compresse une signature PNG en JPEG léger avec fond blanc
+  const compressSignature = (dataUrl) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 400;
+        canvas.height = Math.round(img.height * (400 / img.width));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.6));
+      };
+      img.src = dataUrl;
+    });
+  };
+
   const loadImageAsBase64 = (url) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        canvas.getContext("2d").drawImage(img, 0, 0);
-        resolve(canvas.toDataURL("image/png"));
+        const maxW = 200;
+        const scale = Math.min(1, maxW / img.width);
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
       };
       img.onerror = reject;
       img.src = url;
@@ -106,15 +129,11 @@ export default function Home() {
     const blueBg = [214, 228, 245];
     const blueText = [12, 68, 124];
 
-    // Logo en haut à gauche
     try {
       const logoBase64 = await loadImageAsBase64(LOGO_URL);
-      doc.addImage(logoBase64, "PNG", marginX, 12, 30, 30);
-    } catch (e) {
-      // si le logo ne charge pas, on continue sans
-    }
+      doc.addImage(logoBase64, "JPEG", marginX, 12, 30, 30);
+    } catch (e) {}
 
-    // Coordonnées sous le logo
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
     doc.text("14 Rue de la Sablière", marginX, 48);
@@ -122,7 +141,6 @@ export default function Home() {
     doc.text("contact@jdpose.fr", marginX, 58);
     doc.text("04 28 35 00 40", marginX, 63);
 
-    // Encadré "Lieu d'intervention" en haut à droite
     const lieuX = 115;
     const lieuY = 15;
     const lieuW = 80;
@@ -139,7 +157,6 @@ export default function Home() {
     doc.setFontSize(10);
     doc.text(selectedClient.nom, lieuX + 3, lieuY + 14);
 
-    // Bloc "Fiche d'intervention"
     let y = 75;
     doc.setFillColor(...blueBg);
     doc.rect(marginX, y, pageW - 2 * marginX, 7, "F");
@@ -171,7 +188,6 @@ export default function Home() {
 
     y += 20;
 
-    // Bloc "Désignation des travaux réalisés"
     doc.setFillColor(...blueBg);
     doc.rect(marginX, y, pageW - 2 * marginX, 7, "F");
     doc.setTextColor(...blueText);
@@ -192,10 +208,8 @@ export default function Home() {
 
     y += travauxH + 8;
 
-    // Deux visas côte à côte
     const halfW = (pageW - 2 * marginX) / 2 - 3;
 
-    // Visa technicien
     doc.setFillColor(...blueBg);
     doc.rect(marginX, y, halfW, 7, "F");
     doc.setTextColor(...blueText);
@@ -212,10 +226,9 @@ export default function Home() {
     doc.setFontSize(9);
     doc.text(technicienNom, marginX + 3, y + 18);
     if (technicienSigDataUrl) {
-      doc.addImage(technicienSigDataUrl, "PNG", marginX + 3, y + 20, halfW - 6, 28);
+      doc.addImage(technicienSigDataUrl, "JPEG", marginX + 3, y + 20, halfW - 6, 28);
     }
 
-    // Visa client
     const visaClientX = marginX + halfW + 6;
     doc.setFillColor(...blueBg);
     doc.rect(visaClientX, y, halfW, 7, "F");
@@ -233,10 +246,9 @@ export default function Home() {
     doc.setFontSize(9);
     doc.text(clientNomComplet, visaClientX + 3, y + 18);
     if (clientSigDataUrl) {
-      doc.addImage(clientSigDataUrl, "PNG", visaClientX + 3, y + 20, halfW - 6, 28);
+      doc.addImage(clientSigDataUrl, "JPEG", visaClientX + 3, y + 20, halfW - 6, 28);
     }
 
-    // Pied de page
     y = 278;
     doc.setDrawColor(180, 180, 180);
     doc.line(marginX, y, pageW - marginX, y);
@@ -277,12 +289,14 @@ export default function Home() {
     try {
       const location = await getLocation();
       const dateStr = new Date().toLocaleDateString("fr-FR");
-      const clientSigDataUrl = clientSigRef.current.getDataUrl();
-      const technicienSigDataUrl = technicienSigRef.current.getDataUrl();
 
-      // Upload signatures
-      const clientBlob = await (await fetch(clientSigDataUrl)).blob();
-      const technicienBlob = await (await fetch(technicienSigDataUrl)).blob();
+      // Compresse les signatures pour le PDF
+      const clientSigCompressed = await compressSignature(clientSigRef.current.getDataUrl());
+      const technicienSigCompressed = await compressSignature(technicienSigRef.current.getDataUrl());
+
+      // Upload les versions PNG originales pour l'archivage
+      const clientBlob = await (await fetch(clientSigRef.current.getDataUrl())).blob();
+      const technicienBlob = await (await fetch(technicienSigRef.current.getDataUrl())).blob();
       const ts = Date.now();
 
       const { data: cUpload, error: cErr } = await supabase.storage
@@ -298,7 +312,6 @@ export default function Home() {
       const clientUrl = supabase.storage.from("signatures").getPublicUrl(cUpload.path).data.publicUrl;
       const techUrl = supabase.storage.from("signatures").getPublicUrl(tUpload.path).data.publicUrl;
 
-      // Enregistrement en base
       const { error: insertError } = await supabase.from("signatures").insert({
         client_id: selectedClient.id,
         bon_intervention: bonIntervention.trim(),
@@ -311,11 +324,10 @@ export default function Home() {
       });
       if (insertError) throw insertError;
 
-      // Mémorise email du client
       await supabase.from("signature_clients").update({ email: clientEmail.trim() }).eq("id", selectedClient.id);
 
-      // Génère PDF et envoie
-      const pdfDoc = await buildPdf(dateStr, location, clientSigDataUrl, technicienSigDataUrl);
+      // Génère le PDF avec les signatures compressées
+      const pdfDoc = await buildPdf(dateStr, location, clientSigCompressed, technicienSigCompressed);
       const pdfBase64 = pdfDoc.output("datauristring").split(",")[1];
 
       const res = await fetch("/api/send-pdf", {

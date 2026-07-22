@@ -7,15 +7,24 @@ import jsPDF from "jspdf";
 
 const LOGO_URL = "https://hzpgkwyeglxggwcqxdfo.supabase.co/storage/v1/object/public/photos/logo-JDPOSE.png";
 
+const TEXT_COLORS = [
+  { id: "black", label: "Noir", hex: "#1a1a1a" },
+  { id: "red", label: "Rouge", hex: "#d64545" },
+  { id: "blue", label: "Bleu", hex: "#2f6fed" },
+  { id: "green", label: "Vert", hex: "#2f9e44" },
+];
+
 export default function Home() {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newClientNom, setNewClientNom] = useState("");
+  const [newClientAdresse, setNewClientAdresse] = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
   const [pastSignatures, setPastSignatures] = useState([]);
+  const [editingClient, setEditingClient] = useState(null);
 
   const [editingId, setEditingId] = useState(null);
-  const [bonIntervention, setBonIntervention] = useState("");
+  const [bonBlocks, setBonBlocks] = useState([{ id: 1, text: "", bold: false, color: "black" }]);
   const [clientEmail, setClientEmail] = useState("");
   const [clientNomComplet, setClientNomComplet] = useState("");
   const [technicienNom, setTechnicienNom] = useState("");
@@ -53,18 +62,46 @@ export default function Home() {
     if (!newClientNom.trim()) return;
     const { data, error } = await supabase
       .from("signature_clients")
-      .insert({ nom: newClientNom.trim() })
+      .insert({ nom: newClientNom.trim(), adresse: newClientAdresse.trim() || null })
       .select()
       .single();
     if (!error) {
       setNewClientNom("");
+      setNewClientAdresse("");
       setClients((prev) => [data, ...prev]);
+    }
+  };
+
+  const handleDeleteClient = async (client, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`Supprimer le dossier "${client.nom}" et tous ses bons ?`)) return;
+    try {
+      await supabase.from("signature_clients").delete().eq("id", client.id);
+      setClients((prev) => prev.filter((c) => c.id !== client.id));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la suppression");
+    }
+  };
+
+  const handleEditClient = async () => {
+    if (!editingClient.nom.trim()) return;
+    try {
+      await supabase
+        .from("signature_clients")
+        .update({ nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null })
+        .eq("id", editingClient.id);
+      setClients((prev) => prev.map((c) => (c.id === editingClient.id ? { ...c, nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null } : c)));
+      setEditingClient(null);
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la modification");
     }
   };
 
   const resetForm = () => {
     setEditingId(null);
-    setBonIntervention("");
+    setBonBlocks([{ id: 1, text: "", bold: false, color: "black" }]);
     setClientNomComplet("");
     setTechnicienNom("");
     setTypeIntervention("depannage");
@@ -82,7 +119,15 @@ export default function Home() {
 
   const editPast = (sig) => {
     setEditingId(sig.id);
-    setBonIntervention(sig.bon_intervention || "");
+    // Si le bon a été sauvegardé avec l'ancien format (texte simple), on le met dans un seul bloc noir
+    let blocks;
+    try {
+      blocks = JSON.parse(sig.bon_intervention);
+      if (!Array.isArray(blocks)) throw new Error();
+    } catch {
+      blocks = [{ id: 1, text: sig.bon_intervention || "", bold: false, color: "black" }];
+    }
+    setBonBlocks(blocks);
     setClientEmail(sig.client_email || "");
     setTechnicienNom(sig.technicien_nom || "");
     setClientNomComplet("");
@@ -90,15 +135,17 @@ export default function Home() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const getLocation = () => {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) return resolve(null);
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => resolve(null),
-        { timeout: 5000 }
-      );
-    });
+  // --- Gestion des blocs de texte du bon ---
+  const addBlock = () => {
+    setBonBlocks((prev) => [...prev, { id: Date.now(), text: "", bold: false, color: "black" }]);
+  };
+
+  const updateBlock = (id, changes) => {
+    setBonBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...changes } : b)));
+  };
+
+  const removeBlock = (id) => {
+    setBonBlocks((prev) => (prev.length > 1 ? prev.filter((b) => b.id !== id) : prev));
   };
 
   const compressSignature = (dataUrl) => {
@@ -161,13 +208,14 @@ export default function Home() {
   const buildPdf = async (params) => {
     const {
       dateStr,
-      location,
+      timeStr,
       clientSigDataUrl,
       technicienSigDataUrl,
       clientNomInPdf,
       technicienNomInPdf,
-      bonInPdf,
+      blocksInPdf,
       typeInPdf,
+      adresseInPdf,
     } = params;
 
     const doc = new jsPDF();
@@ -202,7 +250,12 @@ export default function Home() {
     doc.rect(lieuX, lieuY + 7, lieuW, 22);
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(10);
-    doc.text(selectedClient.nom, lieuX + 3, lieuY + 14);
+    doc.text(selectedClient.nom, lieuX + 3, lieuY + 13);
+    if (adresseInPdf) {
+      doc.setFontSize(9);
+      const adrLines = doc.splitTextToSize(adresseInPdf, lieuW - 6);
+      doc.text(adrLines, lieuX + 3, lieuY + 19);
+    }
 
     let y = 75;
     doc.setFillColor(...blueBg);
@@ -248,10 +301,23 @@ export default function Home() {
     const travauxH = 100;
     doc.rect(marginX, y, pageW - 2 * marginX, travauxH);
 
-    doc.setTextColor(30, 30, 30);
+    // Rendu des blocs avec styles (gras + couleur)
+    let textY = y + 6;
     doc.setFontSize(10);
-    const lines = doc.splitTextToSize(bonInPdf, pageW - 2 * marginX - 6);
-    doc.text(lines, marginX + 3, y + 6);
+    for (const block of blocksInPdf) {
+      if (!block.text.trim()) continue;
+      const colorObj = TEXT_COLORS.find((c) => c.id === block.color) || TEXT_COLORS[0];
+      const rgb = hexToRgb(colorObj.hex);
+      doc.setTextColor(...rgb);
+      doc.setFont(undefined, block.bold ? "bold" : "normal");
+      const lines = doc.splitTextToSize(block.text, pageW - 2 * marginX - 6);
+      for (const line of lines) {
+        if (textY > y + travauxH - 3) break;
+        doc.text(line, marginX + 3, textY);
+        textY += 5;
+      }
+    }
+    doc.setFont(undefined, "normal");
 
     y += travauxH + 8;
 
@@ -307,16 +373,7 @@ export default function Home() {
       y + 4,
       { align: "center" }
     );
-    if (location) {
-      doc.text(
-        `Signé le ${dateStr} — Localisation : ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
-        pageW / 2,
-        y + 9,
-        { align: "center" }
-      );
-    } else {
-      doc.text(`Signé le ${dateStr}`, pageW / 2, y + 9, { align: "center" });
-    }
+    doc.text(`Signé le ${dateStr} à ${timeStr}`, pageW / 2, y + 9, { align: "center" });
 
     return doc;
   };
@@ -328,19 +385,28 @@ export default function Home() {
         ? await loadImageAsCompressed(sig.technicien_signature_url)
         : null;
 
-      const dateStr = new Date(sig.created_at).toLocaleDateString("fr-FR");
-      const location =
-        sig.latitude && sig.longitude ? { lat: sig.latitude, lng: sig.longitude } : null;
+      const created = new Date(sig.created_at);
+      const dateStr = created.toLocaleDateString("fr-FR");
+      const timeStr = created.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+      let blocks;
+      try {
+        blocks = JSON.parse(sig.bon_intervention);
+        if (!Array.isArray(blocks)) throw new Error();
+      } catch {
+        blocks = [{ id: 1, text: sig.bon_intervention || "", bold: false, color: "black" }];
+      }
 
       const pdfDoc = await buildPdf({
         dateStr,
-        location,
+        timeStr,
         clientSigDataUrl: clientSigCompressed,
         technicienSigDataUrl: techSigCompressed,
         clientNomInPdf: "",
         technicienNomInPdf: sig.technicien_nom || "",
-        bonInPdf: sig.bon_intervention || "",
+        blocksInPdf: blocks,
         typeInPdf: "depannage",
+        adresseInPdf: selectedClient.adresse || "",
       });
 
       pdfDoc.save(`bon-intervention-${dateStr.replace(/\//g, "-")}.pdf`);
@@ -352,7 +418,8 @@ export default function Home() {
 
   const handleValidate = async () => {
     if (!selectedClient) return;
-    if (!bonIntervention.trim()) return setMessage("Merci de remplir la désignation des travaux.");
+    const hasContent = bonBlocks.some((b) => b.text.trim());
+    if (!hasContent) return setMessage("Merci de remplir la désignation des travaux.");
     if (!technicienNom.trim()) return setMessage("Merci de renseigner le nom du technicien.");
     if (!clientNomComplet.trim()) return setMessage("Merci de renseigner le nom complet du client.");
     if (technicienSigRef.current.isEmpty()) return setMessage("La signature du technicien est vide.");
@@ -363,8 +430,9 @@ export default function Home() {
     setMessage("");
 
     try {
-      const location = await getLocation();
-      const dateStr = new Date().toLocaleDateString("fr-FR");
+      const now = new Date();
+      const dateStr = now.toLocaleDateString("fr-FR");
+      const timeStr = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
       const clientSigCompressed = await compressSignature(clientSigRef.current.getDataUrl());
       const technicienSigCompressed = await compressSignature(technicienSigRef.current.getDataUrl());
@@ -386,30 +454,28 @@ export default function Home() {
       const clientUrl = supabase.storage.from("signatures").getPublicUrl(cUpload.path).data.publicUrl;
       const techUrl = supabase.storage.from("signatures").getPublicUrl(tUpload.path).data.publicUrl;
 
+      const bonJson = JSON.stringify(bonBlocks);
+
       if (editingId) {
         const { error: updateError } = await supabase
           .from("signatures")
           .update({
-            bon_intervention: bonIntervention.trim(),
+            bon_intervention: bonJson,
             signature_url: clientUrl,
             technicien_nom: technicienNom.trim(),
             technicien_signature_url: techUrl,
             client_email: clientEmail.trim(),
-            latitude: location?.lat || null,
-            longitude: location?.lng || null,
           })
           .eq("id", editingId);
         if (updateError) throw updateError;
       } else {
         const { error: insertError } = await supabase.from("signatures").insert({
           client_id: selectedClient.id,
-          bon_intervention: bonIntervention.trim(),
+          bon_intervention: bonJson,
           signature_url: clientUrl,
           technicien_nom: technicienNom.trim(),
           technicien_signature_url: techUrl,
           client_email: clientEmail.trim(),
-          latitude: location?.lat || null,
-          longitude: location?.lng || null,
         });
         if (insertError) throw insertError;
       }
@@ -418,13 +484,14 @@ export default function Home() {
 
       const pdfDoc = await buildPdf({
         dateStr,
-        location,
+        timeStr,
         clientSigDataUrl: clientSigCompressed,
         technicienSigDataUrl: technicienSigCompressed,
         clientNomInPdf: clientNomComplet,
         technicienNomInPdf: technicienNom,
-        bonInPdf: bonIntervention,
+        blocksInPdf: bonBlocks,
         typeInPdf: typeIntervention,
+        adresseInPdf: selectedClient.adresse || "",
       });
       const pdfBase64 = pdfDoc.output("datauristring").split(",")[1];
 
@@ -434,6 +501,8 @@ export default function Home() {
         body: JSON.stringify({
           email: clientEmail.trim(),
           clientNom: selectedClient.nom,
+          dateStr,
+          timeStr,
           pdfBase64,
         }),
       });
@@ -467,6 +536,38 @@ export default function Home() {
 
   const Logo = () => <img src={LOGO_URL} alt="JDPOSE" style={styles.logo} />;
 
+  // --- Vue édition client ---
+  if (editingClient) {
+    return (
+      <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
+        <Logo />
+        <button onClick={() => setEditingClient(null)} style={styles.backBtn}>
+          ← Annuler
+        </button>
+        <h1 style={styles.title}>Modifier le dossier</h1>
+
+        <label style={styles.label}>Nom du client / chantier</label>
+        <input
+          type="text"
+          value={editingClient.nom}
+          onChange={(e) => setEditingClient({ ...editingClient, nom: e.target.value })}
+          style={styles.input}
+        />
+
+        <label style={styles.label}>Adresse</label>
+        <textarea
+          value={editingClient.adresse || ""}
+          onChange={(e) => setEditingClient({ ...editingClient, adresse: e.target.value })}
+          placeholder="Rue, ville, code postal..."
+          rows={3}
+          style={styles.textarea}
+        />
+
+        <button onClick={handleEditClient} style={styles.validateBtn}>Enregistrer</button>
+      </div>
+    );
+  }
+
   if (selectedClient) {
     return (
       <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
@@ -475,6 +576,11 @@ export default function Home() {
           ← Retour aux dossiers
         </button>
         <h1 style={styles.title}>{selectedClient.nom}</h1>
+        {selectedClient.adresse && (
+          <p style={{ margin: "0 0 16px", fontSize: 13, color: "#666", whiteSpace: "pre-wrap" }}>
+            📍 {selectedClient.adresse}
+          </p>
+        )}
 
         {editingId && (
           <div style={styles.editBanner}>
@@ -496,13 +602,48 @@ export default function Home() {
         </div>
 
         <label style={styles.label}>Désignation des travaux réalisés</label>
-        <textarea
-          value={bonIntervention}
-          onChange={(e) => setBonIntervention(e.target.value)}
-          placeholder="Décrivez précisément l'intervention réalisée..."
-          rows={7}
-          style={styles.textarea}
-        />
+        <p style={{ fontSize: 12, color: "#888", margin: "0 0 8px" }}>
+          Chaque ligne peut avoir sa propre couleur et être en gras. Utilisez « + Ajouter une ligne » pour créer une nouvelle section.
+        </p>
+        {bonBlocks.map((block, idx) => (
+          <div key={block.id} style={styles.blockRow}>
+            <div style={styles.blockToolbar}>
+              <button
+                onClick={() => updateBlock(block.id, { bold: !block.bold })}
+                style={{ ...styles.smallBtn, fontWeight: block.bold ? 700 : 400, background: block.bold ? "#1a1a1a" : "#fff", color: block.bold ? "#fff" : "#1a1a1a" }}
+              >
+                G
+              </button>
+              {TEXT_COLORS.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => updateBlock(block.id, { color: c.id })}
+                  title={c.label}
+                  style={{
+                    ...styles.colorSwatch,
+                    background: c.hex,
+                    outline: block.color === c.id ? "2px solid #1a1a1a" : "1px solid #ccc",
+                  }}
+                />
+              ))}
+              {bonBlocks.length > 1 && (
+                <button onClick={() => removeBlock(block.id)} style={styles.smallBtnDanger} title="Supprimer cette ligne">✕</button>
+              )}
+            </div>
+            <textarea
+              value={block.text}
+              onChange={(e) => updateBlock(block.id, { text: e.target.value })}
+              placeholder={`Ligne ${idx + 1}...`}
+              rows={2}
+              style={{
+                ...styles.textarea,
+                fontWeight: block.bold ? 700 : 400,
+                color: (TEXT_COLORS.find((c) => c.id === block.color) || TEXT_COLORS[0]).hex,
+              }}
+            />
+          </div>
+        ))}
+        <button onClick={addBlock} style={styles.addBlockBtn}>+ Ajouter une ligne</button>
 
         <label style={styles.label}>Nom du technicien</label>
         <input type="text" value={technicienNom} onChange={(e) => setTechnicienNom(e.target.value)} placeholder="Nom du technicien" style={styles.input} />
@@ -539,11 +680,6 @@ export default function Home() {
                     <button onClick={() => handleDeletePast(s)} style={styles.deleteBtn} title="Supprimer">✕</button>
                   </div>
                 </div>
-                {s.bon_intervention && (
-                  <p style={{ margin: "4px 0", fontSize: 13, color: "#444", whiteSpace: "pre-wrap" }}>
-                    {s.bon_intervention.slice(0, 150)}{s.bon_intervention.length > 150 ? "..." : ""}
-                  </p>
-                )}
                 <img src={s.signature_url} alt="signature" style={styles.pastThumb} />
               </div>
             ))}
@@ -558,9 +694,24 @@ export default function Home() {
       <Logo />
       <h1 style={styles.title}>Signatures clients</h1>
 
-      <div style={styles.newClientRow}>
-        <input type="text" placeholder="Nom du client / chantier" value={newClientNom} onChange={(e) => setNewClientNom(e.target.value)} style={styles.input} />
-        <button onClick={handleCreateClient} style={styles.addBtn}>+ Nouveau dossier</button>
+      <div style={styles.newClientBlock}>
+        <input
+          type="text"
+          placeholder="Nom du client / chantier"
+          value={newClientNom}
+          onChange={(e) => setNewClientNom(e.target.value)}
+          style={styles.input}
+        />
+        <textarea
+          placeholder="Adresse (rue, ville, code postal...)"
+          value={newClientAdresse}
+          onChange={(e) => setNewClientAdresse(e.target.value)}
+          rows={2}
+          style={{ ...styles.textarea, marginTop: 8 }}
+        />
+        <button onClick={handleCreateClient} style={{ ...styles.addBtn, marginTop: 8, width: "100%" }}>
+          + Nouveau dossier
+        </button>
       </div>
 
       {loading ? (
@@ -570,9 +721,16 @@ export default function Home() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 20 }}>
           {clients.map((c) => (
-            <button key={c.id} onClick={() => openClient(c)} style={styles.clientCard}>
-              📁 {c.nom}
-            </button>
+            <div key={c.id} style={styles.clientCardRow}>
+              <button onClick={() => openClient(c)} style={styles.clientCardMain}>
+                📁 {c.nom}
+                {c.adresse && <span style={{ display: "block", fontSize: 12, color: "#888", marginTop: 2 }}>{c.adresse}</span>}
+              </button>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={() => setEditingClient({ ...c })} style={styles.actionBtn} title="Modifier">✏️</button>
+                <button onClick={(e) => handleDeleteClient(c, e)} style={styles.deleteBtn} title="Supprimer">✕</button>
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -580,23 +738,37 @@ export default function Home() {
   );
 }
 
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return [r, g, b];
+}
+
 const styles = {
   logo: { height: 60, marginBottom: 16 },
   title: { fontSize: 24, fontWeight: 700, marginBottom: 16 },
   label: { display: "block", fontSize: 14, fontWeight: 600, margin: "16px 0 6px" },
   radioRow: { display: "flex", alignItems: "center", gap: 6, fontSize: 14 },
-  newClientRow: { display: "flex", gap: 8 },
+  newClientBlock: { padding: 12, background: "#fff", border: "1px solid #ddd", borderRadius: 10 },
   input: { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ccc", fontSize: 15, boxSizing: "border-box" },
   textarea: { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ccc", fontSize: 15, boxSizing: "border-box", fontFamily: "inherit" },
   addBtn: { padding: "10px 16px", borderRadius: 8, border: "none", background: "#2f6fed", color: "#fff", fontWeight: 600, cursor: "pointer" },
-  clientCard: { textAlign: "left", padding: "14px 16px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", cursor: "pointer", fontSize: 16 },
+  clientCardRow: { display: "flex", alignItems: "center", gap: 8 },
+  clientCardMain: { flex: 1, textAlign: "left", padding: "14px 16px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", cursor: "pointer", fontSize: 16 },
   backBtn: { background: "none", border: "none", color: "#2f6fed", cursor: "pointer", fontSize: 14, padding: 0, marginBottom: 12 },
   validateBtn: { marginTop: 16, width: "100%", padding: "12px 20px", borderRadius: 8, border: "none", background: "#2f6fed", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer" },
   message: { marginTop: 10, fontSize: 14 },
   pastItem: { border: "1px solid #ddd", borderRadius: 8, padding: 10, marginBottom: 10 },
   pastThumb: { width: 200, marginTop: 6, border: "1px solid #eee", borderRadius: 4 },
-  actionBtn: { background: "#fff", border: "1px solid #ccc", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12 },
-  deleteBtn: { background: "#fff5f5", border: "1px solid #e0a0a0", color: "#a12626", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12 },
+  actionBtn: { background: "#fff", border: "1px solid #ccc", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 12 },
+  deleteBtn: { background: "#fff5f5", border: "1px solid #e0a0a0", color: "#a12626", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 12 },
   editBanner: { background: "#e6f1fb", border: "1px solid #b5d4f4", borderRadius: 8, padding: "10px 12px", fontSize: 14, marginBottom: 16 },
   cancelEditBtn: { background: "none", border: "none", color: "#2f6fed", textDecoration: "underline", cursor: "pointer", fontSize: 13, marginLeft: 8 },
+  blockRow: { marginBottom: 10 },
+  blockToolbar: { display: "flex", gap: 6, alignItems: "center", marginBottom: 4 },
+  smallBtn: { padding: "4px 10px", borderRadius: 6, border: "1px solid #ccc", cursor: "pointer", fontSize: 13 },
+  smallBtnDanger: { padding: "4px 8px", borderRadius: 6, border: "1px solid #e0a0a0", background: "#fff5f5", color: "#a12626", cursor: "pointer", fontSize: 12, marginLeft: "auto" },
+  colorSwatch: { width: 22, height: 22, borderRadius: "50%", cursor: "pointer", border: "none" },
+  addBlockBtn: { padding: "8px 12px", borderRadius: 8, border: "1px dashed #2f6fed", background: "#fff", color: "#2f6fed", cursor: "pointer", fontSize: 13, marginTop: 4 },
 };

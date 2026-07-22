@@ -8,10 +8,10 @@ import jsPDF from "jspdf";
 const LOGO_URL = "https://hzpgkwyeglxggwcqxdfo.supabase.co/storage/v1/object/public/photos/logo-JDPOSE.png";
 
 const TEXT_COLORS = [
-  { id: "black", label: "Noir", hex: "#1a1a1a" },
-  { id: "red", label: "Rouge", hex: "#d64545" },
-  { id: "blue", label: "Bleu", hex: "#2f6fed" },
-  { id: "green", label: "Vert", hex: "#2f9e44" },
+  { label: "Noir", hex: "#1a1a1a" },
+  { label: "Rouge", hex: "#d64545" },
+  { label: "Bleu", hex: "#2f6fed" },
+  { label: "Vert", hex: "#2f9e44" },
 ];
 
 export default function Home() {
@@ -24,7 +24,6 @@ export default function Home() {
   const [editingClient, setEditingClient] = useState(null);
 
   const [editingId, setEditingId] = useState(null);
-  const [bonBlocks, setBonBlocks] = useState([{ id: 1, text: "", bold: false, color: "black" }]);
   const [clientEmail, setClientEmail] = useState("");
   const [clientNomComplet, setClientNomComplet] = useState("");
   const [technicienNom, setTechnicienNom] = useState("");
@@ -34,6 +33,7 @@ export default function Home() {
 
   const clientSigRef = useRef(null);
   const technicienSigRef = useRef(null);
+  const editorRef = useRef(null);
 
   useEffect(() => {
     loadClients();
@@ -91,7 +91,9 @@ export default function Home() {
         .from("signature_clients")
         .update({ nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null })
         .eq("id", editingClient.id);
-      setClients((prev) => prev.map((c) => (c.id === editingClient.id ? { ...c, nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null } : c)));
+      setClients((prev) =>
+        prev.map((c) => (c.id === editingClient.id ? { ...c, nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null } : c))
+      );
       setEditingClient(null);
     } catch (err) {
       console.error(err);
@@ -101,7 +103,7 @@ export default function Home() {
 
   const resetForm = () => {
     setEditingId(null);
-    setBonBlocks([{ id: 1, text: "", bold: false, color: "black" }]);
+    if (editorRef.current) editorRef.current.innerHTML = "";
     setClientNomComplet("");
     setTechnicienNom("");
     setTypeIntervention("depannage");
@@ -119,15 +121,12 @@ export default function Home() {
 
   const editPast = (sig) => {
     setEditingId(sig.id);
-    // Si le bon a été sauvegardé avec l'ancien format (texte simple), on le met dans un seul bloc noir
-    let blocks;
-    try {
-      blocks = JSON.parse(sig.bon_intervention);
-      if (!Array.isArray(blocks)) throw new Error();
-    } catch {
-      blocks = [{ id: 1, text: sig.bon_intervention || "", bold: false, color: "black" }];
-    }
-    setBonBlocks(blocks);
+    setTimeout(() => {
+      if (editorRef.current) {
+        // Le contenu peut être du HTML (nouveau format) ou du texte brut (ancien format)
+        editorRef.current.innerHTML = sig.bon_intervention || "";
+      }
+    }, 50);
     setClientEmail(sig.client_email || "");
     setTechnicienNom(sig.technicien_nom || "");
     setClientNomComplet("");
@@ -135,17 +134,10 @@ export default function Home() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // --- Gestion des blocs de texte du bon ---
-  const addBlock = () => {
-    setBonBlocks((prev) => [...prev, { id: Date.now(), text: "", bold: false, color: "black" }]);
-  };
-
-  const updateBlock = (id, changes) => {
-    setBonBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...changes } : b)));
-  };
-
-  const removeBlock = (id) => {
-    setBonBlocks((prev) => (prev.length > 1 ? prev.filter((b) => b.id !== id) : prev));
+  // --- Commandes de l'éditeur riche ---
+  const exec = (command, value = null) => {
+    document.execCommand(command, false, value);
+    if (editorRef.current) editorRef.current.focus();
   };
 
   const compressSignature = (dataUrl) => {
@@ -205,6 +197,62 @@ export default function Home() {
     });
   };
 
+  // Convertit du HTML riche en segments pour le PDF (texte + gras + couleur)
+  const htmlToSegments = (html) => {
+    const container = document.createElement("div");
+    container.innerHTML = html || "";
+    const segments = [];
+
+    const walk = (node, inheritedStyle) => {
+      const style = { ...inheritedStyle };
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (node.textContent) {
+          segments.push({ text: node.textContent, bold: style.bold, color: style.color });
+        }
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      if (tag === "b" || tag === "strong") style.bold = true;
+      const inline = node.getAttribute("style") || "";
+      const fontWeight = /font-weight\s*:\s*([^;]+)/i.exec(inline);
+      if (fontWeight && (fontWeight[1].includes("bold") || parseInt(fontWeight[1]) >= 600)) {
+        style.bold = true;
+      }
+      const colorMatch = /(^|;)\s*color\s*:\s*([^;]+)/i.exec(inline);
+      if (colorMatch) style.color = colorMatch[2].trim();
+      const fontColor = node.getAttribute("color");
+      if (fontColor) style.color = fontColor;
+
+      if (tag === "br") {
+        segments.push({ text: "\n", bold: style.bold, color: style.color });
+        return;
+      }
+
+      for (const child of node.childNodes) walk(child, style);
+
+      if (tag === "div" || tag === "p") {
+        segments.push({ text: "\n", bold: style.bold, color: style.color });
+      }
+    };
+
+    for (const child of container.childNodes) walk(child, { bold: false, color: "#1a1a1a" });
+    return segments;
+  };
+
+  const parseColor = (color) => {
+    if (!color) return [26, 26, 26];
+    if (color.startsWith("#")) {
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      return [r, g, b];
+    }
+    const rgb = /rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(color);
+    if (rgb) return [parseInt(rgb[1]), parseInt(rgb[2]), parseInt(rgb[3])];
+    return [26, 26, 26];
+  };
+
   const buildPdf = async (params) => {
     const {
       dateStr,
@@ -213,7 +261,7 @@ export default function Home() {
       technicienSigDataUrl,
       clientNomInPdf,
       technicienNomInPdf,
-      blocksInPdf,
+      bonHtmlInPdf,
       typeInPdf,
       adresseInPdf,
     } = params;
@@ -301,24 +349,51 @@ export default function Home() {
     const travauxH = 100;
     doc.rect(marginX, y, pageW - 2 * marginX, travauxH);
 
-    // Rendu des blocs avec styles (gras + couleur)
-    let textY = y + 6;
+    // Rendu HTML riche → segments avec styles
+    const segments = htmlToSegments(bonHtmlInPdf);
+    const usableW = pageW - 2 * marginX - 6;
+    let cursorX = marginX + 3;
+    let cursorY = y + 6;
+    const lineH = 5;
     doc.setFontSize(10);
-    for (const block of blocksInPdf) {
-      if (!block.text.trim()) continue;
-      const colorObj = TEXT_COLORS.find((c) => c.id === block.color) || TEXT_COLORS[0];
-      const rgb = hexToRgb(colorObj.hex);
-      doc.setTextColor(...rgb);
-      doc.setFont(undefined, block.bold ? "bold" : "normal");
-      const lines = doc.splitTextToSize(block.text, pageW - 2 * marginX - 6);
-      for (const line of lines) {
-        if (textY > y + travauxH - 3) break;
-        doc.text(line, marginX + 3, textY);
-        textY += 5;
-      }
-    }
-    doc.setFont(undefined, "normal");
 
+    for (const seg of segments) {
+      if (!seg.text) continue;
+      const rgb = parseColor(seg.color);
+      doc.setTextColor(...rgb);
+      doc.setFont(undefined, seg.bold ? "bold" : "normal");
+
+      // Traiter les retours à la ligne dans le segment
+      const parts = seg.text.split("\n");
+      for (let pi = 0; pi < parts.length; pi++) {
+        const part = parts[pi];
+        if (part) {
+          // Découper en mots pour la césure
+          const words = part.split(/(\s+)/);
+          for (const word of words) {
+            if (!word) continue;
+            const wordW = doc.getTextWidth(word);
+            if (cursorX + wordW > marginX + 3 + usableW) {
+              cursorY += lineH;
+              cursorX = marginX + 3;
+              if (cursorY > y + travauxH - 2) break;
+              if (/^\s+$/.test(word)) continue;
+            }
+            if (cursorY > y + travauxH - 2) break;
+            doc.text(word, cursorX, cursorY);
+            cursorX += wordW;
+          }
+        }
+        if (pi < parts.length - 1) {
+          cursorY += lineH;
+          cursorX = marginX + 3;
+          if (cursorY > y + travauxH - 2) break;
+        }
+      }
+      if (cursorY > y + travauxH - 2) break;
+    }
+
+    doc.setFont(undefined, "normal");
     y += travauxH + 8;
 
     const halfW = (pageW - 2 * marginX) / 2 - 3;
@@ -389,14 +464,6 @@ export default function Home() {
       const dateStr = created.toLocaleDateString("fr-FR");
       const timeStr = created.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
-      let blocks;
-      try {
-        blocks = JSON.parse(sig.bon_intervention);
-        if (!Array.isArray(blocks)) throw new Error();
-      } catch {
-        blocks = [{ id: 1, text: sig.bon_intervention || "", bold: false, color: "black" }];
-      }
-
       const pdfDoc = await buildPdf({
         dateStr,
         timeStr,
@@ -404,7 +471,7 @@ export default function Home() {
         technicienSigDataUrl: techSigCompressed,
         clientNomInPdf: "",
         technicienNomInPdf: sig.technicien_nom || "",
-        blocksInPdf: blocks,
+        bonHtmlInPdf: sig.bon_intervention || "",
         typeInPdf: "depannage",
         adresseInPdf: selectedClient.adresse || "",
       });
@@ -418,8 +485,9 @@ export default function Home() {
 
   const handleValidate = async () => {
     if (!selectedClient) return;
-    const hasContent = bonBlocks.some((b) => b.text.trim());
-    if (!hasContent) return setMessage("Merci de remplir la désignation des travaux.");
+    const bonHtml = editorRef.current ? editorRef.current.innerHTML : "";
+    const bonText = editorRef.current ? editorRef.current.innerText : "";
+    if (!bonText.trim()) return setMessage("Merci de remplir la désignation des travaux.");
     if (!technicienNom.trim()) return setMessage("Merci de renseigner le nom du technicien.");
     if (!clientNomComplet.trim()) return setMessage("Merci de renseigner le nom complet du client.");
     if (technicienSigRef.current.isEmpty()) return setMessage("La signature du technicien est vide.");
@@ -454,13 +522,11 @@ export default function Home() {
       const clientUrl = supabase.storage.from("signatures").getPublicUrl(cUpload.path).data.publicUrl;
       const techUrl = supabase.storage.from("signatures").getPublicUrl(tUpload.path).data.publicUrl;
 
-      const bonJson = JSON.stringify(bonBlocks);
-
       if (editingId) {
         const { error: updateError } = await supabase
           .from("signatures")
           .update({
-            bon_intervention: bonJson,
+            bon_intervention: bonHtml,
             signature_url: clientUrl,
             technicien_nom: technicienNom.trim(),
             technicien_signature_url: techUrl,
@@ -471,7 +537,7 @@ export default function Home() {
       } else {
         const { error: insertError } = await supabase.from("signatures").insert({
           client_id: selectedClient.id,
-          bon_intervention: bonJson,
+          bon_intervention: bonHtml,
           signature_url: clientUrl,
           technicien_nom: technicienNom.trim(),
           technicien_signature_url: techUrl,
@@ -489,7 +555,7 @@ export default function Home() {
         technicienSigDataUrl: technicienSigCompressed,
         clientNomInPdf: clientNomComplet,
         technicienNomInPdf: technicienNom,
-        blocksInPdf: bonBlocks,
+        bonHtmlInPdf: bonHtml,
         typeInPdf: typeIntervention,
         adresseInPdf: selectedClient.adresse || "",
       });
@@ -536,7 +602,6 @@ export default function Home() {
 
   const Logo = () => <img src={LOGO_URL} alt="JDPOSE" style={styles.logo} />;
 
-  // --- Vue édition client ---
   if (editingClient) {
     return (
       <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
@@ -603,47 +668,27 @@ export default function Home() {
 
         <label style={styles.label}>Désignation des travaux réalisés</label>
         <p style={{ fontSize: 12, color: "#888", margin: "0 0 8px" }}>
-          Chaque ligne peut avoir sa propre couleur et être en gras. Utilisez « + Ajouter une ligne » pour créer une nouvelle section.
+          Cliquez sur <b>G</b> puis tapez pour écrire en gras, ou sélectionnez du texte existant et cliquez sur <b>G</b> ou une couleur.
         </p>
-        {bonBlocks.map((block, idx) => (
-          <div key={block.id} style={styles.blockRow}>
-            <div style={styles.blockToolbar}>
-              <button
-                onClick={() => updateBlock(block.id, { bold: !block.bold })}
-                style={{ ...styles.smallBtn, fontWeight: block.bold ? 700 : 400, background: block.bold ? "#1a1a1a" : "#fff", color: block.bold ? "#fff" : "#1a1a1a" }}
-              >
-                G
-              </button>
-              {TEXT_COLORS.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => updateBlock(block.id, { color: c.id })}
-                  title={c.label}
-                  style={{
-                    ...styles.colorSwatch,
-                    background: c.hex,
-                    outline: block.color === c.id ? "2px solid #1a1a1a" : "1px solid #ccc",
-                  }}
-                />
-              ))}
-              {bonBlocks.length > 1 && (
-                <button onClick={() => removeBlock(block.id)} style={styles.smallBtnDanger} title="Supprimer cette ligne">✕</button>
-              )}
-            </div>
-            <textarea
-              value={block.text}
-              onChange={(e) => updateBlock(block.id, { text: e.target.value })}
-              placeholder={`Ligne ${idx + 1}...`}
-              rows={2}
-              style={{
-                ...styles.textarea,
-                fontWeight: block.bold ? 700 : 400,
-                color: (TEXT_COLORS.find((c) => c.id === block.color) || TEXT_COLORS[0]).hex,
-              }}
+        <div style={styles.richToolbar}>
+          <button type="button" onClick={() => exec("bold")} style={styles.richBtn}><b>G</b></button>
+          {TEXT_COLORS.map((c) => (
+            <button
+              key={c.hex}
+              type="button"
+              onClick={() => exec("foreColor", c.hex)}
+              title={c.label}
+              style={{ ...styles.colorSwatch, background: c.hex }}
             />
-          </div>
-        ))}
-        <button onClick={addBlock} style={styles.addBlockBtn}>+ Ajouter une ligne</button>
+          ))}
+        </div>
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          style={styles.editor}
+          data-placeholder="Décrivez précisément l'intervention réalisée..."
+        />
 
         <label style={styles.label}>Nom du technicien</label>
         <input type="text" value={technicienNom} onChange={(e) => setTechnicienNom(e.target.value)} placeholder="Nom du technicien" style={styles.input} />
@@ -738,13 +783,6 @@ export default function Home() {
   );
 }
 
-function hexToRgb(hex) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return [r, g, b];
-}
-
 const styles = {
   logo: { height: 60, marginBottom: 16 },
   title: { fontSize: 24, fontWeight: 700, marginBottom: 16 },
@@ -765,10 +803,8 @@ const styles = {
   deleteBtn: { background: "#fff5f5", border: "1px solid #e0a0a0", color: "#a12626", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 12 },
   editBanner: { background: "#e6f1fb", border: "1px solid #b5d4f4", borderRadius: 8, padding: "10px 12px", fontSize: 14, marginBottom: 16 },
   cancelEditBtn: { background: "none", border: "none", color: "#2f6fed", textDecoration: "underline", cursor: "pointer", fontSize: 13, marginLeft: 8 },
-  blockRow: { marginBottom: 10 },
-  blockToolbar: { display: "flex", gap: 6, alignItems: "center", marginBottom: 4 },
-  smallBtn: { padding: "4px 10px", borderRadius: 6, border: "1px solid #ccc", cursor: "pointer", fontSize: 13 },
-  smallBtnDanger: { padding: "4px 8px", borderRadius: 6, border: "1px solid #e0a0a0", background: "#fff5f5", color: "#a12626", cursor: "pointer", fontSize: 12, marginLeft: "auto" },
-  colorSwatch: { width: 22, height: 22, borderRadius: "50%", cursor: "pointer", border: "none" },
-  addBlockBtn: { padding: "8px 12px", borderRadius: 8, border: "1px dashed #2f6fed", background: "#fff", color: "#2f6fed", cursor: "pointer", fontSize: 13, marginTop: 4 },
+  richToolbar: { display: "flex", gap: 6, alignItems: "center", marginBottom: 6, padding: "6px 8px", background: "#f5f5f5", borderRadius: 8 },
+  richBtn: { padding: "6px 12px", borderRadius: 6, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 14 },
+  colorSwatch: { width: 24, height: 24, borderRadius: "50%", cursor: "pointer", border: "1px solid #ccc" },
+  editor: { minHeight: 160, padding: 12, borderRadius: 8, border: "1px solid #ccc", background: "#fff", fontSize: 15, fontFamily: "inherit", outline: "none", whiteSpace: "pre-wrap" },
 };

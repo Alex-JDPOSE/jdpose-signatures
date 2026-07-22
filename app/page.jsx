@@ -1,4 +1,4 @@
-"use client";
+a"use client";
 
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
@@ -14,6 +14,7 @@ export default function Home() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [pastSignatures, setPastSignatures] = useState([]);
 
+  const [editingId, setEditingId] = useState(null);
   const [bonIntervention, setBonIntervention] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [clientNomComplet, setClientNomComplet] = useState("");
@@ -61,15 +62,32 @@ export default function Home() {
     }
   };
 
-  const openClient = async (client) => {
-    setSelectedClient(client);
+  const resetForm = () => {
+    setEditingId(null);
     setBonIntervention("");
-    setClientEmail(client.email || "");
     setClientNomComplet("");
     setTechnicienNom("");
     setTypeIntervention("depannage");
+    if (clientSigRef.current) clientSigRef.current.clear();
+    if (technicienSigRef.current) technicienSigRef.current.clear();
     setMessage("");
+  };
+
+  const openClient = async (client) => {
+    setSelectedClient(client);
+    resetForm();
+    setClientEmail(client.email || "");
     await loadPastSignatures(client.id);
+  };
+
+  const editPast = (sig) => {
+    setEditingId(sig.id);
+    setBonIntervention(sig.bon_intervention || "");
+    setClientEmail(sig.client_email || "");
+    setTechnicienNom(sig.technicien_nom || "");
+    setClientNomComplet("");
+    setMessage("Modifie ce que tu veux, refais signer, puis valide pour renvoyer le PDF.");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const getLocation = () => {
@@ -83,7 +101,6 @@ export default function Home() {
     });
   };
 
-  // Compresse une signature PNG en JPEG léger avec fond blanc
   const compressSignature = (dataUrl) => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -122,7 +139,37 @@ export default function Home() {
     });
   };
 
-  const buildPdf = async (dateStr, location, clientSigDataUrl, technicienSigDataUrl) => {
+  const loadImageAsCompressed = (url) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 400;
+        canvas.height = Math.round(img.height * (400 / img.width));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  };
+
+  const buildPdf = async (params) => {
+    const {
+      dateStr,
+      location,
+      clientSigDataUrl,
+      technicienSigDataUrl,
+      clientNomInPdf,
+      technicienNomInPdf,
+      bonInPdf,
+      typeInPdf,
+    } = params;
+
     const doc = new jsPDF();
     const pageW = 210;
     const marginX = 15;
@@ -181,8 +228,8 @@ export default function Home() {
 
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(11);
-    doc.text(typeIntervention === "depannage" ? "X" : "", marginX + col1W / 2, y + 11, { align: "center" });
-    doc.text(typeIntervention === "devis" ? "X" : "", marginX + col1W * 1.5, y + 11, { align: "center" });
+    doc.text(typeInPdf === "depannage" ? "X" : "", marginX + col1W / 2, y + 11, { align: "center" });
+    doc.text(typeInPdf === "devis" ? "X" : "", marginX + col1W * 1.5, y + 11, { align: "center" });
     doc.setFontSize(10);
     doc.text(dateStr, marginX + col1W * 2.5, y + 11, { align: "center" });
 
@@ -203,7 +250,7 @@ export default function Home() {
 
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(10);
-    const lines = doc.splitTextToSize(bonIntervention, pageW - 2 * marginX - 6);
+    const lines = doc.splitTextToSize(bonInPdf, pageW - 2 * marginX - 6);
     doc.text(lines, marginX + 3, y + 6);
 
     y += travauxH + 8;
@@ -224,7 +271,7 @@ export default function Home() {
     doc.text("Nom + Signature", marginX + halfW / 2, y + 12, { align: "center" });
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(9);
-    doc.text(technicienNom, marginX + 3, y + 18);
+    doc.text(technicienNomInPdf, marginX + 3, y + 18);
     if (technicienSigDataUrl) {
       doc.addImage(technicienSigDataUrl, "JPEG", marginX + 3, y + 20, halfW - 6, 28);
     }
@@ -244,7 +291,7 @@ export default function Home() {
     doc.text("Nom + Signature", visaClientX + halfW / 2, y + 12, { align: "center" });
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(9);
-    doc.text(clientNomComplet, visaClientX + 3, y + 18);
+    doc.text(clientNomInPdf, visaClientX + 3, y + 18);
     if (clientSigDataUrl) {
       doc.addImage(clientSigDataUrl, "JPEG", visaClientX + 3, y + 20, halfW - 6, 28);
     }
@@ -274,6 +321,35 @@ export default function Home() {
     return doc;
   };
 
+  const viewPastPdf = async (sig) => {
+    try {
+      const clientSigCompressed = await loadImageAsCompressed(sig.signature_url);
+      const techSigCompressed = sig.technicien_signature_url
+        ? await loadImageAsCompressed(sig.technicien_signature_url)
+        : null;
+
+      const dateStr = new Date(sig.created_at).toLocaleDateString("fr-FR");
+      const location =
+        sig.latitude && sig.longitude ? { lat: sig.latitude, lng: sig.longitude } : null;
+
+      const pdfDoc = await buildPdf({
+        dateStr,
+        location,
+        clientSigDataUrl: clientSigCompressed,
+        technicienSigDataUrl: techSigCompressed,
+        clientNomInPdf: "",
+        technicienNomInPdf: sig.technicien_nom || "",
+        bonInPdf: sig.bon_intervention || "",
+        typeInPdf: "depannage",
+      });
+
+      pdfDoc.save(`bon-intervention-${dateStr.replace(/\//g, "-")}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de l'ouverture du PDF");
+    }
+  };
+
   const handleValidate = async () => {
     if (!selectedClient) return;
     if (!bonIntervention.trim()) return setMessage("Merci de remplir la désignation des travaux.");
@@ -290,11 +366,9 @@ export default function Home() {
       const location = await getLocation();
       const dateStr = new Date().toLocaleDateString("fr-FR");
 
-      // Compresse les signatures pour le PDF
       const clientSigCompressed = await compressSignature(clientSigRef.current.getDataUrl());
       const technicienSigCompressed = await compressSignature(technicienSigRef.current.getDataUrl());
 
-      // Upload les versions PNG originales pour l'archivage
       const clientBlob = await (await fetch(clientSigRef.current.getDataUrl())).blob();
       const technicienBlob = await (await fetch(technicienSigRef.current.getDataUrl())).blob();
       const ts = Date.now();
@@ -312,22 +386,46 @@ export default function Home() {
       const clientUrl = supabase.storage.from("signatures").getPublicUrl(cUpload.path).data.publicUrl;
       const techUrl = supabase.storage.from("signatures").getPublicUrl(tUpload.path).data.publicUrl;
 
-      const { error: insertError } = await supabase.from("signatures").insert({
-        client_id: selectedClient.id,
-        bon_intervention: bonIntervention.trim(),
-        signature_url: clientUrl,
-        technicien_nom: technicienNom.trim(),
-        technicien_signature_url: techUrl,
-        client_email: clientEmail.trim(),
-        latitude: location?.lat || null,
-        longitude: location?.lng || null,
-      });
-      if (insertError) throw insertError;
+      if (editingId) {
+        const { error: updateError } = await supabase
+          .from("signatures")
+          .update({
+            bon_intervention: bonIntervention.trim(),
+            signature_url: clientUrl,
+            technicien_nom: technicienNom.trim(),
+            technicien_signature_url: techUrl,
+            client_email: clientEmail.trim(),
+            latitude: location?.lat || null,
+            longitude: location?.lng || null,
+          })
+          .eq("id", editingId);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase.from("signatures").insert({
+          client_id: selectedClient.id,
+          bon_intervention: bonIntervention.trim(),
+          signature_url: clientUrl,
+          technicien_nom: technicienNom.trim(),
+          technicien_signature_url: techUrl,
+          client_email: clientEmail.trim(),
+          latitude: location?.lat || null,
+          longitude: location?.lng || null,
+        });
+        if (insertError) throw insertError;
+      }
 
       await supabase.from("signature_clients").update({ email: clientEmail.trim() }).eq("id", selectedClient.id);
 
-      // Génère le PDF avec les signatures compressées
-      const pdfDoc = await buildPdf(dateStr, location, clientSigCompressed, technicienSigCompressed);
+      const pdfDoc = await buildPdf({
+        dateStr,
+        location,
+        clientSigDataUrl: clientSigCompressed,
+        technicienSigDataUrl: technicienSigCompressed,
+        clientNomInPdf: clientNomComplet,
+        technicienNomInPdf: technicienNom,
+        bonInPdf: bonIntervention,
+        typeInPdf: typeIntervention,
+      });
       const pdfBase64 = pdfDoc.output("datauristring").split(",")[1];
 
       const res = await fetch("/api/send-pdf", {
@@ -341,12 +439,8 @@ export default function Home() {
       });
       if (!res.ok) throw new Error("Échec de l'envoi");
 
-      setMessage("Bon d'intervention signé et envoyé par email ✅");
-      setBonIntervention("");
-      setClientNomComplet("");
-      setTechnicienNom("");
-      clientSigRef.current.clear();
-      technicienSigRef.current.clear();
+      setMessage(editingId ? "Bon modifié et renvoyé ✅" : "Bon signé et envoyé par email ✅");
+      resetForm();
       await loadPastSignatures(selectedClient.id);
     } catch (err) {
       console.error(err);
@@ -381,6 +475,13 @@ export default function Home() {
           ← Retour aux dossiers
         </button>
         <h1 style={styles.title}>{selectedClient.nom}</h1>
+
+        {editingId && (
+          <div style={styles.editBanner}>
+            ✏️ Vous modifiez un bon existant.{" "}
+            <button onClick={resetForm} style={styles.cancelEditBtn}>Annuler la modification</button>
+          </div>
+        )}
 
         <label style={styles.label}>Type d'intervention</label>
         <div style={{ display: "flex", gap: 12 }}>
@@ -419,7 +520,7 @@ export default function Home() {
         <SignaturePad ref={clientSigRef} />
 
         <button onClick={handleValidate} disabled={saving} style={styles.validateBtn}>
-          {saving ? "Envoi en cours..." : "Valider et envoyer par email"}
+          {saving ? "Envoi en cours..." : editingId ? "Renvoyer par email" : "Valider et envoyer par email"}
         </button>
         {message && <p style={styles.message}>{message}</p>}
 
@@ -428,12 +529,21 @@ export default function Home() {
             <h2 style={{ fontSize: 18 }}>Bons précédents</h2>
             {pastSignatures.map((s) => (
               <div key={s.id} style={styles.pastItem}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <p style={{ margin: 0, fontSize: 13, color: "#888" }}>
                     {new Date(s.created_at).toLocaleDateString("fr-FR")} — {s.client_email}
                   </p>
-                  <button onClick={() => handleDeletePast(s)} style={styles.deleteBtn} title="Supprimer">✕</button>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => viewPastPdf(s)} style={styles.actionBtn} title="Voir le PDF">📄 Voir</button>
+                    <button onClick={() => editPast(s)} style={styles.actionBtn} title="Modifier">✏️ Modifier</button>
+                    <button onClick={() => handleDeletePast(s)} style={styles.deleteBtn} title="Supprimer">✕</button>
+                  </div>
                 </div>
+                {s.bon_intervention && (
+                  <p style={{ margin: "4px 0", fontSize: 13, color: "#444", whiteSpace: "pre-wrap" }}>
+                    {s.bon_intervention.slice(0, 150)}{s.bon_intervention.length > 150 ? "..." : ""}
+                  </p>
+                )}
                 <img src={s.signature_url} alt="signature" style={styles.pastThumb} />
               </div>
             ))}
@@ -485,5 +595,8 @@ const styles = {
   message: { marginTop: 10, fontSize: 14 },
   pastItem: { border: "1px solid #ddd", borderRadius: 8, padding: 10, marginBottom: 10 },
   pastThumb: { width: 200, marginTop: 6, border: "1px solid #eee", borderRadius: 4 },
-  deleteBtn: { background: "rgba(255,255,255,0.9)", border: "1px solid #e0a0a0", color: "#a12626", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12 },
+  actionBtn: { background: "#fff", border: "1px solid #ccc", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12 },
+  deleteBtn: { background: "#fff5f5", border: "1px solid #e0a0a0", color: "#a12626", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12 },
+  editBanner: { background: "#e6f1fb", border: "1px solid #b5d4f4", borderRadius: 8, padding: "10px 12px", fontSize: 14, marginBottom: 16 },
+  cancelEditBtn: { background: "none", border: "none", color: "#2f6fed", textDecoration: "underline", cursor: "pointer", fontSize: 13, marginLeft: 8 },
 };

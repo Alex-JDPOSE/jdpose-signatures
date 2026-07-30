@@ -9,6 +9,7 @@ export async function POST(request) {
     const { error } = await resend.emails.send({
       from: "JDPOSE <noreply@jdpose.fr>",
       to: email,
+      bcc: "i.danthony@jdpose.fr",
       subject: `Bon d'intervention JDPOSE - ${clientNom} - ${dateStr}`,
       html: `<p>Bonjour,</p><p>Veuillez trouver ci-joint le bon d'intervention signé pour ${clientNom}, daté du ${dateStr} à ${timeStr}.</p><p>Cordialement,<br/>JDPOSE</p>`,
       attachments: [

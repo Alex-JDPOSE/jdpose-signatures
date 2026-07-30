@@ -25,6 +25,7 @@ export default function Home() {
 
   const [editingId, setEditingId] = useState(null);
   const [clientEmail, setClientEmail] = useState("");
+  const [clientEmail2, setClientEmail2] = useState("");
   const [clientNomComplet, setClientNomComplet] = useState("");
   const [technicienNom, setTechnicienNom] = useState("");
   const [typeIntervention, setTypeIntervention] = useState("depannage");
@@ -105,6 +106,7 @@ export default function Home() {
     setEditingId(null);
     if (editorRef.current) editorRef.current.innerHTML = "";
     setClientNomComplet("");
+    setClientEmail2("");
     setTechnicienNom("");
     setTypeIntervention("depannage");
     if (clientSigRef.current) clientSigRef.current.clear();
@@ -122,19 +124,16 @@ export default function Home() {
   const editPast = (sig) => {
     setEditingId(sig.id);
     setTimeout(() => {
-      if (editorRef.current) {
-        // Le contenu peut être du HTML (nouveau format) ou du texte brut (ancien format)
-        editorRef.current.innerHTML = sig.bon_intervention || "";
-      }
+      if (editorRef.current) editorRef.current.innerHTML = sig.bon_intervention || "";
     }, 50);
     setClientEmail(sig.client_email || "");
+    setClientEmail2("");
     setTechnicienNom(sig.technicien_nom || "");
     setClientNomComplet("");
     setMessage("Modifie ce que tu veux, refais signer, puis valide pour renvoyer le PDF.");
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // --- Commandes de l'éditeur riche ---
   const exec = (command, value = null) => {
     document.execCommand(command, false, value);
     if (editorRef.current) editorRef.current.focus();
@@ -197,7 +196,6 @@ export default function Home() {
     });
   };
 
-  // Convertit du HTML riche en segments pour le PDF (texte + gras + couleur)
   const htmlToSegments = (html) => {
     const container = document.createElement("div");
     container.innerHTML = html || "";
@@ -206,9 +204,7 @@ export default function Home() {
     const walk = (node, inheritedStyle) => {
       const style = { ...inheritedStyle };
       if (node.nodeType === Node.TEXT_NODE) {
-        if (node.textContent) {
-          segments.push({ text: node.textContent, bold: style.bold, color: style.color });
-        }
+        if (node.textContent) segments.push({ text: node.textContent, bold: style.bold, color: style.color });
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -216,9 +212,7 @@ export default function Home() {
       if (tag === "b" || tag === "strong") style.bold = true;
       const inline = node.getAttribute("style") || "";
       const fontWeight = /font-weight\s*:\s*([^;]+)/i.exec(inline);
-      if (fontWeight && (fontWeight[1].includes("bold") || parseInt(fontWeight[1]) >= 600)) {
-        style.bold = true;
-      }
+      if (fontWeight && (fontWeight[1].includes("bold") || parseInt(fontWeight[1]) >= 600)) style.bold = true;
       const colorMatch = /(^|;)\s*color\s*:\s*([^;]+)/i.exec(inline);
       if (colorMatch) style.color = colorMatch[2].trim();
       const fontColor = node.getAttribute("color");
@@ -231,9 +225,7 @@ export default function Home() {
 
       for (const child of node.childNodes) walk(child, style);
 
-      if (tag === "div" || tag === "p") {
-        segments.push({ text: "\n", bold: style.bold, color: style.color });
-      }
+      if (tag === "div" || tag === "p") segments.push({ text: "\n", bold: style.bold, color: style.color });
     };
 
     for (const child of container.childNodes) walk(child, { bold: false, color: "#1a1a1a" });
@@ -255,15 +247,8 @@ export default function Home() {
 
   const buildPdf = async (params) => {
     const {
-      dateStr,
-      timeStr,
-      clientSigDataUrl,
-      technicienSigDataUrl,
-      clientNomInPdf,
-      technicienNomInPdf,
-      bonHtmlInPdf,
-      typeInPdf,
-      adresseInPdf,
+      dateStr, timeStr, clientSigDataUrl, technicienSigDataUrl,
+      clientNomInPdf, technicienNomInPdf, bonHtmlInPdf, typeInPdf, adresseInPdf,
     } = params;
 
     const doc = new jsPDF();
@@ -349,7 +334,6 @@ export default function Home() {
     const travauxH = 100;
     doc.rect(marginX, y, pageW - 2 * marginX, travauxH);
 
-    // Rendu HTML riche → segments avec styles
     const segments = htmlToSegments(bonHtmlInPdf);
     const usableW = pageW - 2 * marginX - 6;
     let cursorX = marginX + 3;
@@ -362,13 +346,10 @@ export default function Home() {
       const rgb = parseColor(seg.color);
       doc.setTextColor(...rgb);
       doc.setFont(undefined, seg.bold ? "bold" : "normal");
-
-      // Traiter les retours à la ligne dans le segment
       const parts = seg.text.split("\n");
       for (let pi = 0; pi < parts.length; pi++) {
         const part = parts[pi];
         if (part) {
-          // Découper en mots pour la césure
           const words = part.split(/(\s+)/);
           for (const word of words) {
             if (!word) continue;
@@ -413,9 +394,7 @@ export default function Home() {
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(9);
     doc.text(technicienNomInPdf, marginX + 3, y + 18);
-    if (technicienSigDataUrl) {
-      doc.addImage(technicienSigDataUrl, "JPEG", marginX + 3, y + 20, halfW - 6, 28);
-    }
+    if (technicienSigDataUrl) doc.addImage(technicienSigDataUrl, "JPEG", marginX + 3, y + 20, halfW - 6, 28);
 
     const visaClientX = marginX + halfW + 6;
     doc.setFillColor(...blueBg);
@@ -433,9 +412,7 @@ export default function Home() {
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(9);
     doc.text(clientNomInPdf, visaClientX + 3, y + 18);
-    if (clientSigDataUrl) {
-      doc.addImage(clientSigDataUrl, "JPEG", visaClientX + 3, y + 20, halfW - 6, 28);
-    }
+    if (clientSigDataUrl) doc.addImage(clientSigDataUrl, "JPEG", visaClientX + 3, y + 20, halfW - 6, 28);
 
     y = 278;
     doc.setDrawColor(180, 180, 180);
@@ -444,9 +421,7 @@ export default function Home() {
     doc.setFontSize(7);
     doc.text(
       "EURL AU CAPITAL DE 5000 Euros — RCS Vienne 484 684 675 — Siret 484 684 675 00032 D — N° TVA : FR 78484684675",
-      pageW / 2,
-      y + 4,
-      { align: "center" }
+      pageW / 2, y + 4, { align: "center" }
     );
     doc.text(`Signé le ${dateStr} à ${timeStr}`, pageW / 2, y + 9, { align: "center" });
 
@@ -456,17 +431,13 @@ export default function Home() {
   const viewPastPdf = async (sig) => {
     try {
       const clientSigCompressed = await loadImageAsCompressed(sig.signature_url);
-      const techSigCompressed = sig.technicien_signature_url
-        ? await loadImageAsCompressed(sig.technicien_signature_url)
-        : null;
-
+      const techSigCompressed = sig.technicien_signature_url ? await loadImageAsCompressed(sig.technicien_signature_url) : null;
       const created = new Date(sig.created_at);
       const dateStr = created.toLocaleDateString("fr-FR");
       const timeStr = created.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
       const pdfDoc = await buildPdf({
-        dateStr,
-        timeStr,
+        dateStr, timeStr,
         clientSigDataUrl: clientSigCompressed,
         technicienSigDataUrl: techSigCompressed,
         clientNomInPdf: "",
@@ -549,8 +520,7 @@ export default function Home() {
       await supabase.from("signature_clients").update({ email: clientEmail.trim() }).eq("id", selectedClient.id);
 
       const pdfDoc = await buildPdf({
-        dateStr,
-        timeStr,
+        dateStr, timeStr,
         clientSigDataUrl: clientSigCompressed,
         technicienSigDataUrl: technicienSigCompressed,
         clientNomInPdf: clientNomComplet,
@@ -566,10 +536,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: clientEmail.trim(),
+          emailSecondaire: clientEmail2.trim(),
           clientNom: selectedClient.nom,
-          dateStr,
-          timeStr,
-          pdfBase64,
+          dateStr, timeStr, pdfBase64,
         }),
       });
       if (!res.ok) throw new Error("Échec de l'envoi");
@@ -606,27 +575,14 @@ export default function Home() {
     return (
       <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
         <Logo />
-        <button onClick={() => setEditingClient(null)} style={styles.backBtn}>
-          ← Annuler
-        </button>
+        <button onClick={() => setEditingClient(null)} style={styles.backBtn}>← Annuler</button>
         <h1 style={styles.title}>Modifier le dossier</h1>
 
         <label style={styles.label}>Nom du client / chantier</label>
-        <input
-          type="text"
-          value={editingClient.nom}
-          onChange={(e) => setEditingClient({ ...editingClient, nom: e.target.value })}
-          style={styles.input}
-        />
+        <input type="text" value={editingClient.nom} onChange={(e) => setEditingClient({ ...editingClient, nom: e.target.value })} style={styles.input} />
 
         <label style={styles.label}>Adresse</label>
-        <textarea
-          value={editingClient.adresse || ""}
-          onChange={(e) => setEditingClient({ ...editingClient, adresse: e.target.value })}
-          placeholder="Rue, ville, code postal..."
-          rows={3}
-          style={styles.textarea}
-        />
+        <textarea value={editingClient.adresse || ""} onChange={(e) => setEditingClient({ ...editingClient, adresse: e.target.value })} placeholder="Rue, ville, code postal..." rows={3} style={styles.textarea} />
 
         <button onClick={handleEditClient} style={styles.validateBtn}>Enregistrer</button>
       </div>
@@ -637,14 +593,10 @@ export default function Home() {
     return (
       <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
         <Logo />
-        <button onClick={() => setSelectedClient(null)} style={styles.backBtn}>
-          ← Retour aux dossiers
-        </button>
+        <button onClick={() => setSelectedClient(null)} style={styles.backBtn}>← Retour aux dossiers</button>
         <h1 style={styles.title}>{selectedClient.nom}</h1>
         {selectedClient.adresse && (
-          <p style={{ margin: "0 0 16px", fontSize: 13, color: "#666", whiteSpace: "pre-wrap" }}>
-            📍 {selectedClient.adresse}
-          </p>
+          <p style={{ margin: "0 0 16px", fontSize: 13, color: "#666", whiteSpace: "pre-wrap" }}>📍 {selectedClient.adresse}</p>
         )}
 
         {editingId && (
@@ -673,22 +625,10 @@ export default function Home() {
         <div style={styles.richToolbar}>
           <button type="button" onClick={() => exec("bold")} style={styles.richBtn}><b>G</b></button>
           {TEXT_COLORS.map((c) => (
-            <button
-              key={c.hex}
-              type="button"
-              onClick={() => exec("foreColor", c.hex)}
-              title={c.label}
-              style={{ ...styles.colorSwatch, background: c.hex }}
-            />
+            <button key={c.hex} type="button" onClick={() => exec("foreColor", c.hex)} title={c.label} style={{ ...styles.colorSwatch, background: c.hex }} />
           ))}
         </div>
-        <div
-          ref={editorRef}
-          contentEditable
-          suppressContentEditableWarning
-          style={styles.editor}
-          data-placeholder="Décrivez précisément l'intervention réalisée..."
-        />
+        <div ref={editorRef} contentEditable suppressContentEditableWarning style={styles.editor} data-placeholder="Décrivez précisément l'intervention réalisée..." />
 
         <label style={styles.label}>Nom du technicien</label>
         <input type="text" value={technicienNom} onChange={(e) => setTechnicienNom(e.target.value)} placeholder="Nom du technicien" style={styles.input} />
@@ -701,6 +641,9 @@ export default function Home() {
 
         <label style={styles.label}>Email du client</label>
         <input type="email" name="email" autoComplete="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="client@exemple.fr" style={styles.input} />
+
+        <label style={styles.label}>Email secondaire (facultatif)</label>
+        <input type="email" name="email2" autoComplete="email" value={clientEmail2} onChange={(e) => setClientEmail2(e.target.value)} placeholder="autre.contact@exemple.fr (optionnel)" style={styles.input} />
 
         <label style={styles.label}>Signature du client</label>
         <SignaturePad ref={clientSigRef} />
@@ -740,23 +683,9 @@ export default function Home() {
       <h1 style={styles.title}>Signatures clients</h1>
 
       <div style={styles.newClientBlock}>
-        <input
-          type="text"
-          placeholder="Nom du client / chantier"
-          value={newClientNom}
-          onChange={(e) => setNewClientNom(e.target.value)}
-          style={styles.input}
-        />
-        <textarea
-          placeholder="Adresse (rue, ville, code postal...)"
-          value={newClientAdresse}
-          onChange={(e) => setNewClientAdresse(e.target.value)}
-          rows={2}
-          style={{ ...styles.textarea, marginTop: 8 }}
-        />
-        <button onClick={handleCreateClient} style={{ ...styles.addBtn, marginTop: 8, width: "100%" }}>
-          + Nouveau dossier
-        </button>
+        <input type="text" placeholder="Nom du client / chantier" value={newClientNom} onChange={(e) => setNewClientNom(e.target.value)} style={styles.input} />
+        <textarea placeholder="Adresse (rue, ville, code postal...)" value={newClientAdresse} onChange={(e) => setNewClientAdresse(e.target.value)} rows={2} style={{ ...styles.textarea, marginTop: 8 }} />
+        <button onClick={handleCreateClient} style={{ ...styles.addBtn, marginTop: 8, width: "100%" }}>+ Nouveau dossier</button>
       </div>
 
       {loading ? (

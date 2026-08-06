@@ -764,9 +764,11 @@ export default function Home() {
                 <button onClick={() => openClient(c)} style={styles.clientCardMain}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     📁 {c.nom}
-                    <span style={signatureCounts[c.id] ? styles.badgeSigned : styles.badgePending}>
-                      {signatureCounts[c.id] ? "Signé" : "En attente"}
-                    </span>
+                    {signatureCounts[c.id] > 0 && (
+                      <span style={styles.badgeSigned}>
+                        {signatureCounts[c.id]} intervention{signatureCounts[c.id] > 1 ? "s" : ""}
+                      </span>
+                    )}
                   </div>
                   {c.adresse && <span style={{ display: "block", fontSize: 12, color: "#888", marginTop: 2 }}>{c.adresse}</span>}
                 </button>
@@ -814,5 +816,4 @@ const styles = {
   filterBtn: { padding: "6px 12px", borderRadius: 20, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 13, color: "#555" },
   filterBtnActive: { padding: "6px 12px", borderRadius: 20, border: "1px solid #2f6fed", background: "#2f6fed", cursor: "pointer", fontSize: 13, color: "#fff", fontWeight: 600 },
   badgeSigned: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#e3f7e8", color: "#1e7d38" },
-  badgePending: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#fff3e0", color: "#c67100" },
 };

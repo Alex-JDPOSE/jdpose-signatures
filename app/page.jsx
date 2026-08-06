@@ -29,6 +29,7 @@ export default function Home() {
   const [signatureCounts, setSignatureCounts] = useState({});
   const [allSignatures, setAllSignatures] = useState([]);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [showNewClientForm, setShowNewClientForm] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
 
@@ -92,6 +93,7 @@ export default function Home() {
       setNewClientNom("");
       setNewClientAdresse("");
       setClients((prev) => [data, ...prev]);
+      setShowNewClientForm(false);
     }
   };
 
@@ -896,11 +898,18 @@ export default function Home() {
       <Logo />
       <h1 style={styles.title}>Signatures clients</h1>
 
-      <div style={styles.newClientBlock}>
-        <input type="text" placeholder="Nom du client / chantier" value={newClientNom} onChange={(e) => setNewClientNom(e.target.value)} style={styles.input} />
-        <textarea placeholder="Adresse (rue, ville, code postal...)" value={newClientAdresse} onChange={(e) => setNewClientAdresse(e.target.value)} rows={2} style={{ ...styles.textarea, marginTop: 8 }} />
-        <button onClick={handleCreateClient} style={{ ...styles.addBtn, marginTop: 8, width: "100%" }}>+ Nouveau dossier</button>
-      </div>
+      {!showNewClientForm ? (
+        <button onClick={() => setShowNewClientForm(true)} style={{ ...styles.addBtn, width: "100%" }}>+ Ajouter un client</button>
+      ) : (
+        <div style={styles.newClientBlock}>
+          <input type="text" placeholder="Nom du client / chantier" value={newClientNom} onChange={(e) => setNewClientNom(e.target.value)} style={styles.input} />
+          <textarea placeholder="Adresse (rue, ville, code postal...)" value={newClientAdresse} onChange={(e) => setNewClientAdresse(e.target.value)} rows={2} style={{ ...styles.textarea, marginTop: 8 }} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={() => { setShowNewClientForm(false); setNewClientNom(""); setNewClientAdresse(""); }} style={{ ...styles.actionBtn, flex: 1 }}>Annuler</button>
+            <button onClick={handleCreateClient} style={{ ...styles.addBtn, flex: 2 }}>+ Créer le dossier</button>
+          </div>
+        </div>
+      )}
 
       <input
         type="text"

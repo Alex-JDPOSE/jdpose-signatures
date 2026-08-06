@@ -641,20 +641,23 @@ export default function Home() {
     return { thisMonthCount: thisMonthSigs.length, topClients, avgDays };
   };
 
-  const handleExportMonth = () => {
+  const handleExport = (period) => {
     const now = new Date();
-    const monthSigs = allSignatures.filter((s) => {
+    const periodSigs = allSignatures.filter((s) => {
       const d = new Date(s.created_at);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      if (period === "month") {
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      }
+      return d.getFullYear() === now.getFullYear();
     });
 
-    if (monthSigs.length === 0) {
-      alert("Aucune intervention ce mois-ci à exporter.");
+    if (periodSigs.length === 0) {
+      alert(period === "month" ? "Aucune intervention ce mois-ci à exporter." : "Aucune intervention cette année à exporter.");
       return;
     }
 
     const rows = [["Client", "Date", "Technicien", "Email client"]];
-    monthSigs.forEach((s) => {
+    periodSigs.forEach((s) => {
       const client = clients.find((c) => c.id === s.client_id);
       rows.push([
         client ? client.nom : "Client supprimé",
@@ -669,7 +672,9 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `interventions-${now.getMonth() + 1}-${now.getFullYear()}.csv`;
+    link.download = period === "month"
+      ? `interventions-${now.getMonth() + 1}-${now.getFullYear()}.csv`
+      : `interventions-${now.getFullYear()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -772,7 +777,10 @@ export default function Home() {
           )}
         </div>
 
-        <button onClick={handleExportMonth} style={{ ...styles.addBtn, marginTop: 12, width: "100%" }}>⬇️ Exporter le mois (Excel)</button>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button onClick={() => handleExport("month")} style={{ ...styles.addBtn, flex: 1 }}>⬇️ Exporter le mois</button>
+          <button onClick={() => handleExport("year")} style={{ ...styles.addBtn, flex: 1 }}>⬇️ Exporter l'année</button>
+        </div>
       </div>
     );
   }
@@ -930,7 +938,8 @@ export default function Home() {
 
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <button onClick={() => setShowDashboard(true)} style={{ ...styles.filterBtn, flex: 1 }}>📊 Tableau de bord</button>
-        <button onClick={handleExportMonth} style={{ ...styles.filterBtn, flex: 1 }}>⬇️ Exporter le mois</button>
+        <button onClick={() => handleExport("month")} style={{ ...styles.filterBtn, flex: 1 }}>⬇️ Exporter le mois</button>
+        <button onClick={() => handleExport("year")} style={{ ...styles.filterBtn, flex: 1 }}>⬇️ Exporter l'année</button>
       </div>
 
       {loading ? (

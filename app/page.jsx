@@ -23,6 +23,11 @@ export default function Home() {
   const [pastSignatures, setPastSignatures] = useState([]);
   const [editingClient, setEditingClient] = useState(null);
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState("recent"); // "recent" | "alpha"
+  const [dateFilter, setDateFilter] = useState("all"); // "all" | "week" | "month"
+  const [signatureCounts, setSignatureCounts] = useState({});
+
   const [editingId, setEditingId] = useState(null);
   const [clientEmail, setClientEmail] = useState("");
   const [clientEmail2, setClientEmail2] = useState("");
@@ -47,6 +52,16 @@ export default function Home() {
       .select("*")
       .order("created_at", { ascending: false });
     if (!error) setClients(data || []);
+
+    const { data: sigs } = await supabase.from("signatures").select("client_id");
+    if (sigs) {
+      const counts = {};
+      sigs.forEach((s) => {
+        counts[s.client_id] = (counts[s.client_id] || 0) + 1;
+      });
+      setSignatureCounts(counts);
+    }
+
     setLoading(false);
   };
 
@@ -569,6 +584,33 @@ export default function Home() {
     }
   };
 
+  const getFilteredClients = () => {
+    let result = [...clients];
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter(
+        (c) => c.nom.toLowerCase().includes(q) || (c.adresse || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (dateFilter !== "all") {
+      const now = new Date();
+      const limit = new Date();
+      if (dateFilter === "week") limit.setDate(now.getDate() - 7);
+      if (dateFilter === "month") limit.setMonth(now.getMonth() - 1);
+      result = result.filter((c) => new Date(c.created_at) >= limit);
+    }
+
+    if (sortBy === "alpha") {
+      result.sort((a, b) => a.nom.localeCompare(b.nom));
+    } else {
+      result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
+
+    return result;
+  };
+
   const Logo = () => <img src={LOGO_URL} alt="JDPOSE" style={styles.logo} />;
 
   if (editingClient) {
@@ -677,6 +719,8 @@ export default function Home() {
     );
   }
 
+  const filteredClients = getFilteredClients();
+
   return (
     <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
       <Logo />
@@ -688,25 +732,55 @@ export default function Home() {
         <button onClick={handleCreateClient} style={{ ...styles.addBtn, marginTop: 8, width: "100%" }}>+ Nouveau dossier</button>
       </div>
 
+      <input
+        type="text"
+        placeholder="🔍 Rechercher un client..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        style={{ ...styles.input, marginTop: 16 }}
+      />
+
+      <div style={styles.filterRow}>
+        <button onClick={() => setDateFilter("all")} style={dateFilter === "all" ? styles.filterBtnActive : styles.filterBtn}>Tous</button>
+        <button onClick={() => setDateFilter("week")} style={dateFilter === "week" ? styles.filterBtnActive : styles.filterBtn}>Cette semaine</button>
+        <button onClick={() => setDateFilter("month")} style={dateFilter === "month" ? styles.filterBtnActive : styles.filterBtn}>Ce mois-ci</button>
+        <button onClick={() => setSortBy(sortBy === "recent" ? "alpha" : "recent")} style={styles.filterBtn}>
+          {sortBy === "recent" ? "↓ Récent" : "A→Z"}
+        </button>
+      </div>
+
       {loading ? (
         <p>Chargement...</p>
       ) : clients.length === 0 ? (
         <p style={{ color: "#888" }}>Aucun dossier pour l'instant.</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 20 }}>
-          {clients.map((c) => (
-            <div key={c.id} style={styles.clientCardRow}>
-              <button onClick={() => openClient(c)} style={styles.clientCardMain}>
-                📁 {c.nom}
-                {c.adresse && <span style={{ display: "block", fontSize: 12, color: "#888", marginTop: 2 }}>{c.adresse}</span>}
-              </button>
-              <div style={{ display: "flex", gap: 4 }}>
-                <button onClick={() => setEditingClient({ ...c })} style={styles.actionBtn} title="Modifier">✏️</button>
-                <button onClick={(e) => handleDeleteClient(c, e)} style={styles.deleteBtn} title="Supprimer">✕</button>
+        <>
+          <p style={{ fontSize: 13, color: "#888", margin: "12px 0 8px" }}>
+            {filteredClients.length} dossier{filteredClients.length > 1 ? "s" : ""}
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filteredClients.map((c) => (
+              <div key={c.id} style={styles.clientCardRow}>
+                <button onClick={() => openClient(c)} style={styles.clientCardMain}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    📁 {c.nom}
+                    <span style={signatureCounts[c.id] ? styles.badgeSigned : styles.badgePending}>
+                      {signatureCounts[c.id] ? "Signé" : "En attente"}
+                    </span>
+                  </div>
+                  {c.adresse && <span style={{ display: "block", fontSize: 12, color: "#888", marginTop: 2 }}>{c.adresse}</span>}
+                </button>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => setEditingClient({ ...c })} style={styles.actionBtn} title="Modifier">✏️</button>
+                  <button onClick={(e) => handleDeleteClient(c, e)} style={styles.deleteBtn} title="Supprimer">✕</button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+            {filteredClients.length === 0 && (
+              <p style={{ color: "#888", fontSize: 14 }}>Aucun résultat pour cette recherche.</p>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -736,4 +810,9 @@ const styles = {
   richBtn: { padding: "6px 12px", borderRadius: 6, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 14 },
   colorSwatch: { width: 24, height: 24, borderRadius: "50%", cursor: "pointer", border: "1px solid #ccc" },
   editor: { minHeight: 160, padding: 12, borderRadius: 8, border: "1px solid #ccc", background: "#fff", fontSize: 15, fontFamily: "inherit", outline: "none", whiteSpace: "pre-wrap" },
+  filterRow: { display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" },
+  filterBtn: { padding: "6px 12px", borderRadius: 20, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 13, color: "#555" },
+  filterBtnActive: { padding: "6px 12px", borderRadius: 20, border: "1px solid #2f6fed", background: "#2f6fed", cursor: "pointer", fontSize: 13, color: "#fff", fontWeight: 600 },
+  badgeSigned: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#e3f7e8", color: "#1e7d38" },
+  badgePending: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#fff3e0", color: "#c67100" },
 };

@@ -27,6 +27,10 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("recent"); // "recent" | "alpha"
   const [dateFilter, setDateFilter] = useState("all"); // "all" | "week" | "month"
   const [signatureCounts, setSignatureCounts] = useState({});
+  const [allSignatures, setAllSignatures] = useState([]);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
 
   const [editingId, setEditingId] = useState(null);
   const [clientEmail, setClientEmail] = useState("");
@@ -53,8 +57,11 @@ export default function Home() {
       .order("created_at", { ascending: false });
     if (!error) setClients(data || []);
 
-    const { data: sigs } = await supabase.from("signatures").select("client_id");
+    const { data: sigs } = await supabase
+      .from("signatures")
+      .select("id, client_id, created_at, technicien_nom, client_email");
     if (sigs) {
+      setAllSignatures(sigs);
       const counts = {};
       sigs.forEach((s) => {
         counts[s.client_id] = (counts[s.client_id] || 0) + 1;
@@ -578,10 +585,128 @@ export default function Home() {
       if (tFile) await supabase.storage.from("signatures").remove([tFile]);
       await supabase.from("signatures").delete().eq("id", sig.id);
       setPastSignatures((prev) => prev.filter((s) => s.id !== sig.id));
+      setSignatureCounts((prev) => {
+        const updated = { ...prev };
+        if (updated[sig.client_id]) {
+          updated[sig.client_id] = Math.max(0, updated[sig.client_id] - 1);
+          if (updated[sig.client_id] === 0) delete updated[sig.client_id];
+        }
+        return updated;
+      });
+      setAllSignatures((prev) => prev.filter((s) => s.id !== sig.id));
     } catch (err) {
       console.error(err);
       alert("Erreur lors de la suppression");
     }
+  };
+
+  const daysSince = (dateStr) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
+  };
+
+  const getDashboardStats = () => {
+    const now = new Date();
+    const thisMonthSigs = allSignatures.filter((s) => {
+      const d = new Date(s.created_at);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+
+    const topClientsMap = {};
+    allSignatures.forEach((s) => {
+      topClientsMap[s.client_id] = (topClientsMap[s.client_id] || 0) + 1;
+    });
+    const topClients = Object.entries(topClientsMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([clientId, count]) => {
+        const client = clients.find((c) => c.id === clientId);
+        return { nom: client ? client.nom : "Client supprimé", count };
+      });
+
+    let avgDays = null;
+    const durations = allSignatures
+      .map((s) => {
+        const client = clients.find((c) => c.id === s.client_id);
+        if (!client) return null;
+        return daysSince(client.created_at) - daysSince(s.created_at);
+      })
+      .filter((d) => d !== null && d >= 0);
+    if (durations.length > 0) {
+      avgDays = (durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(1);
+    }
+
+    return { thisMonthCount: thisMonthSigs.length, topClients, avgDays };
+  };
+
+  const handleExportMonth = () => {
+    const now = new Date();
+    const monthSigs = allSignatures.filter((s) => {
+      const d = new Date(s.created_at);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+
+    if (monthSigs.length === 0) {
+      alert("Aucune intervention ce mois-ci à exporter.");
+      return;
+    }
+
+    const rows = [["Client", "Date", "Technicien", "Email client"]];
+    monthSigs.forEach((s) => {
+      const client = clients.find((c) => c.id === s.client_id);
+      rows.push([
+        client ? client.nom : "Client supprimé",
+        new Date(s.created_at).toLocaleDateString("fr-FR"),
+        s.technicien_nom || "",
+        s.client_email || "",
+      ]);
+    });
+
+    const csvContent = rows.map((r) => r.map((v) => `"${(v || "").toString().replace(/"/g, '""')}"`).join(";")).join("\n");
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `interventions-${now.getMonth() + 1}-${now.getFullYear()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleDictation = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("La dictée vocale n'est pas disponible sur ce navigateur.");
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "fr-FR";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      if (editorRef.current) {
+        editorRef.current.focus();
+        document.execCommand("insertText", false, transcript + " ");
+      }
+    };
+
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
   };
 
   const getFilteredClients = () => {
@@ -612,6 +737,43 @@ export default function Home() {
   };
 
   const Logo = () => <img src={LOGO_URL} alt="JDPOSE" style={styles.logo} />;
+
+  if (showDashboard) {
+    const stats = getDashboardStats();
+    return (
+      <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
+        <Logo />
+        <button onClick={() => setShowDashboard(false)} style={styles.backBtn}>← Retour aux dossiers</button>
+        <h1 style={styles.title}>Tableau de bord</h1>
+
+        <div style={styles.statCard}>
+          <p style={styles.statLabel}>Interventions ce mois-ci</p>
+          <p style={styles.statValue}>{stats.thisMonthCount}</p>
+        </div>
+
+        <div style={styles.statCard}>
+          <p style={styles.statLabel}>Temps moyen création → signature</p>
+          <p style={styles.statValue}>{stats.avgDays !== null ? `${stats.avgDays} j` : "—"}</p>
+        </div>
+
+        <div style={styles.statCard}>
+          <p style={styles.statLabel}>Clients les plus actifs</p>
+          {stats.topClients.length === 0 ? (
+            <p style={{ color: "#888", fontSize: 14 }}>Pas encore de données.</p>
+          ) : (
+            stats.topClients.map((tc, i) => (
+              <div key={i} style={styles.topClientRow}>
+                <span>{tc.nom}</span>
+                <span style={{ fontWeight: 600 }}>{tc.count}</span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <button onClick={handleExportMonth} style={{ ...styles.addBtn, marginTop: 12, width: "100%" }}>⬇️ Exporter le mois (Excel)</button>
+      </div>
+    );
+  }
 
   if (editingClient) {
     return (
@@ -669,6 +831,14 @@ export default function Home() {
           {TEXT_COLORS.map((c) => (
             <button key={c.hex} type="button" onClick={() => exec("foreColor", c.hex)} title={c.label} style={{ ...styles.colorSwatch, background: c.hex }} />
           ))}
+          <button
+            type="button"
+            onClick={toggleDictation}
+            style={isListening ? styles.micBtnActive : styles.richBtn}
+            title="Dictée vocale"
+          >
+            {isListening ? "🔴 Écoute..." : "🎤 Dictée"}
+          </button>
         </div>
         <div ref={editorRef} contentEditable suppressContentEditableWarning style={styles.editor} data-placeholder="Décrivez précisément l'intervention réalisée..." />
 
@@ -749,6 +919,11 @@ export default function Home() {
         </button>
       </div>
 
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button onClick={() => setShowDashboard(true)} style={{ ...styles.filterBtn, flex: 1 }}>📊 Tableau de bord</button>
+        <button onClick={handleExportMonth} style={{ ...styles.filterBtn, flex: 1 }}>⬇️ Exporter le mois</button>
+      </div>
+
       {loading ? (
         <p>Chargement...</p>
       ) : clients.length === 0 ? (
@@ -768,6 +943,9 @@ export default function Home() {
                       <span style={styles.badgeSigned}>
                         {signatureCounts[c.id]} intervention{signatureCounts[c.id] > 1 ? "s" : ""}
                       </span>
+                    )}
+                    {!signatureCounts[c.id] && daysSince(c.created_at) >= 14 && (
+                      <span style={styles.badgeReminder}>🕓 Créé il y a {daysSince(c.created_at)} j</span>
                     )}
                   </div>
                   {c.adresse && <span style={{ display: "block", fontSize: 12, color: "#888", marginTop: 2 }}>{c.adresse}</span>}
@@ -816,4 +994,10 @@ const styles = {
   filterBtn: { padding: "6px 12px", borderRadius: 20, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 13, color: "#555" },
   filterBtnActive: { padding: "6px 12px", borderRadius: 20, border: "1px solid #2f6fed", background: "#2f6fed", cursor: "pointer", fontSize: 13, color: "#fff", fontWeight: 600 },
   badgeSigned: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#e3f7e8", color: "#1e7d38" },
+  badgeReminder: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#eef1f5", color: "#5a6472" },
+  micBtnActive: { padding: "6px 12px", borderRadius: 6, border: "1px solid #d64545", background: "#fdeaea", color: "#a12626", cursor: "pointer", fontSize: 14 },
+  statCard: { padding: 16, background: "#fff", border: "1px solid #ddd", borderRadius: 10, marginTop: 12 },
+  statLabel: { fontSize: 13, color: "#888", margin: 0 },
+  statValue: { fontSize: 28, fontWeight: 700, margin: "4px 0 0" },
+  topClientRow: { display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f0f0f0", fontSize: 14 },
 };

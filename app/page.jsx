@@ -14,6 +14,8 @@ const TEXT_COLORS = [
   { label: "Vert", hex: "#2f9e44" },
 ];
 
+const DUREE_OPTIONS = ["30 min", "1h", "1h30", "2h", "2h30", "3h", "3h30", "4h", "4h30", "5h"];
+
 export default function Home() {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,7 @@ export default function Home() {
   const [clientNomComplet, setClientNomComplet] = useState("");
   const [technicienNom, setTechnicienNom] = useState("");
   const [typeIntervention, setTypeIntervention] = useState("depannage");
+  const [dureeIntervention, setDureeIntervention] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -133,6 +136,7 @@ export default function Home() {
     setClientEmail2("");
     setTechnicienNom("");
     setTypeIntervention("depannage");
+    setDureeIntervention("");
     if (clientSigRef.current) clientSigRef.current.clear();
     if (technicienSigRef.current) technicienSigRef.current.clear();
     setMessage("");
@@ -154,6 +158,7 @@ export default function Home() {
     setClientEmail2("");
     setTechnicienNom(sig.technicien_nom || "");
     setClientNomComplet("");
+    setDureeIntervention(sig.duree_intervention || "");
     setMessage("Modifie ce que tu veux, refais signer, puis valide pour renvoyer le PDF.");
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -272,7 +277,7 @@ export default function Home() {
   const buildPdf = async (params) => {
     const {
       dateStr, timeStr, clientSigDataUrl, technicienSigDataUrl,
-      clientNomInPdf, technicienNomInPdf, bonHtmlInPdf, typeInPdf, adresseInPdf,
+      clientNomInPdf, technicienNomInPdf, bonHtmlInPdf, typeInPdf, adresseInPdf, dureeInPdf,
     } = params;
 
     const doc = new jsPDF();
@@ -324,17 +329,19 @@ export default function Home() {
     doc.setFont(undefined, "normal");
     y += 7;
 
-    const col1W = (pageW - 2 * marginX) / 3;
+    const col1W = (pageW - 2 * marginX) / 4;
     doc.setDrawColor(180, 180, 180);
     doc.rect(marginX, y, col1W, 14);
     doc.rect(marginX + col1W, y, col1W, 14);
     doc.rect(marginX + col1W * 2, y, col1W, 14);
+    doc.rect(marginX + col1W * 3, y, col1W, 14);
 
     doc.setTextColor(80, 80, 80);
     doc.setFontSize(9);
     doc.text("Dépannage", marginX + col1W / 2, y + 5, { align: "center" });
     doc.text("Suivant devis", marginX + col1W * 1.5, y + 5, { align: "center" });
     doc.text("Date", marginX + col1W * 2.5, y + 5, { align: "center" });
+    doc.text("Durée", marginX + col1W * 3.5, y + 5, { align: "center" });
 
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(11);
@@ -342,6 +349,7 @@ export default function Home() {
     doc.text(typeInPdf === "devis" ? "X" : "", marginX + col1W * 1.5, y + 11, { align: "center" });
     doc.setFontSize(10);
     doc.text(dateStr, marginX + col1W * 2.5, y + 11, { align: "center" });
+    doc.text(dureeInPdf || "", marginX + col1W * 3.5, y + 11, { align: "center" });
 
     y += 20;
 
@@ -469,6 +477,7 @@ export default function Home() {
         bonHtmlInPdf: sig.bon_intervention || "",
         typeInPdf: "depannage",
         adresseInPdf: selectedClient.adresse || "",
+        dureeInPdf: sig.duree_intervention || "",
       });
 
       pdfDoc.save(`bon-intervention-${dateStr.replace(/\//g, "-")}.pdf`);
@@ -485,6 +494,7 @@ export default function Home() {
     if (!bonText.trim()) return setMessage("Merci de remplir la désignation des travaux.");
     if (!technicienNom.trim()) return setMessage("Merci de renseigner le nom du technicien.");
     if (!clientNomComplet.trim()) return setMessage("Merci de renseigner le nom complet du client.");
+    if (!dureeIntervention) return setMessage("Merci de renseigner la durée de l'intervention.");
     if (technicienSigRef.current.isEmpty()) return setMessage("La signature du technicien est vide.");
     if (clientSigRef.current.isEmpty()) return setMessage("La signature du client est vide.");
     if (!clientEmail.trim()) return setMessage("Merci de renseigner l'email du client.");
@@ -526,6 +536,7 @@ export default function Home() {
             technicien_nom: technicienNom.trim(),
             technicien_signature_url: techUrl,
             client_email: clientEmail.trim(),
+            duree_intervention: dureeIntervention,
           })
           .eq("id", editingId);
         if (updateError) throw updateError;
@@ -537,6 +548,7 @@ export default function Home() {
           technicien_nom: technicienNom.trim(),
           technicien_signature_url: techUrl,
           client_email: clientEmail.trim(),
+          duree_intervention: dureeIntervention,
         });
         if (insertError) throw insertError;
       }
@@ -552,6 +564,7 @@ export default function Home() {
         bonHtmlInPdf: bonHtml,
         typeInPdf: typeIntervention,
         adresseInPdf: selectedClient.adresse || "",
+        dureeInPdf: dureeIntervention,
       });
       const pdfBase64 = pdfDoc.output("datauristring").split(",")[1];
 
@@ -831,6 +844,14 @@ export default function Home() {
             Suivant devis
           </label>
         </div>
+
+        <label style={styles.label}>Durée de l'intervention</label>
+        <select value={dureeIntervention} onChange={(e) => setDureeIntervention(e.target.value)} style={styles.input}>
+          <option value="">Sélectionner...</option>
+          {DUREE_OPTIONS.map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
 
         <label style={styles.label}>Désignation des travaux réalisés</label>
         <p style={{ fontSize: 12, color: "#888", margin: "0 0 8px" }}>

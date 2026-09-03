@@ -14,7 +14,7 @@ const TEXT_COLORS = [
   { label: "Vert", hex: "#2f9e44" },
 ];
 
-const DUREE_OPTIONS = ["30 min", "1h", "1h30", "2h", "2h30", "3h", "3h30", "4h", "4h30", "5h"];
+const DUREE_OPTIONS = ["30 min", "1h", "1h30", "2h", "2h30", "3h", "3h30", "4h", "4h30", "5h", "5h30", "6h"];
 
 export default function Home() {
   const [clients, setClients] = useState([]);

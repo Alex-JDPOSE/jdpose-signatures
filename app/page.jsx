@@ -1,4 +1,4 @@
-"use client";
+a"use client";
 
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
@@ -42,6 +42,7 @@ export default function Home() {
   const [technicienNom, setTechnicienNom] = useState("");
   const [typeIntervention, setTypeIntervention] = useState("depannage");
   const [dureeIntervention, setDureeIntervention] = useState("");
+  const [nacelle, setNacelle] = useState("non");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -137,6 +138,7 @@ export default function Home() {
     setTechnicienNom("");
     setTypeIntervention("depannage");
     setDureeIntervention("");
+    setNacelle("non");
     if (clientSigRef.current) clientSigRef.current.clear();
     if (technicienSigRef.current) technicienSigRef.current.clear();
     setMessage("");
@@ -157,7 +159,9 @@ export default function Home() {
     setClientEmail(sig.client_email || "");
     setClientEmail2("");
     setTechnicienNom(sig.technicien_nom || "");
-    setClientNomComplet("");
+    setClientNomComplet(sig.client_nom_complet || "");
+    setTypeIntervention(sig.type_intervention || "depannage");
+    setNacelle(sig.nacelle ? "oui" : "non");
     setDureeIntervention(sig.duree_intervention || "");
     setMessage("Modifie ce que tu veux, refais signer, puis valide pour renvoyer le PDF.");
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -257,7 +261,20 @@ export default function Home() {
       if (tag === "div" || tag === "p") segments.push({ text: "\n", bold: style.bold, color: style.color });
     };
 
-    for (const child of container.childNodes) walk(child, { bold: false, color: "#1a1a1a" });
+    // On force un retour à la ligne entre chaque bloc de "premier niveau" du contenu
+    // (chaque <div>/<p> créé par le navigateur à chaque appui sur Entrée), y compris
+    // après la toute première ligne tapée avant le premier Entrée : cette première ligne
+    // n'est pas toujours entourée d'un <div> par le navigateur, donc sans ce correctif
+    // elle n'obtenait aucun retour à la ligne et se retrouvait collée à la ligne suivante.
+    const topLevelChildren = [...container.childNodes];
+    topLevelChildren.forEach((child, idx) => {
+      walk(child, { bold: false, color: "#1a1a1a" });
+      const isLast = idx === topLevelChildren.length - 1;
+      const lastSeg = segments[segments.length - 1];
+      if (!isLast && (!lastSeg || lastSeg.text !== "\n")) {
+        segments.push({ text: "\n", bold: false, color: "#1a1a1a" });
+      }
+    });
     return segments;
   };
 
@@ -277,7 +294,7 @@ export default function Home() {
   const buildPdf = async (params) => {
     const {
       dateStr, timeStr, clientSigDataUrl, technicienSigDataUrl,
-      clientNomInPdf, technicienNomInPdf, bonHtmlInPdf, typeInPdf, adresseInPdf, dureeInPdf,
+      clientNomInPdf, technicienNomInPdf, bonHtmlInPdf, typeInPdf, adresseInPdf, dureeInPdf, nacelleInPdf,
     } = params;
 
     const doc = new jsPDF();
@@ -329,27 +346,27 @@ export default function Home() {
     doc.setFont(undefined, "normal");
     y += 7;
 
-    const col1W = (pageW - 2 * marginX) / 4;
+    const col1W = (pageW - 2 * marginX) / 5;
     doc.setDrawColor(180, 180, 180);
-    doc.rect(marginX, y, col1W, 14);
-    doc.rect(marginX + col1W, y, col1W, 14);
-    doc.rect(marginX + col1W * 2, y, col1W, 14);
-    doc.rect(marginX + col1W * 3, y, col1W, 14);
+    for (let ci = 0; ci < 5; ci++) doc.rect(marginX + col1W * ci, y, col1W, 14);
 
     doc.setTextColor(80, 80, 80);
-    doc.setFontSize(9);
-    doc.text("Dépannage", marginX + col1W / 2, y + 5, { align: "center" });
+    doc.setFontSize(8);
+    doc.text("Dépannage", marginX + col1W * 0.5, y + 5, { align: "center" });
     doc.text("Suivant devis", marginX + col1W * 1.5, y + 5, { align: "center" });
-    doc.text("Date", marginX + col1W * 2.5, y + 5, { align: "center" });
-    doc.text("Durée", marginX + col1W * 3.5, y + 5, { align: "center" });
+    doc.text("Nacelle JDPOSE", marginX + col1W * 2.5, y + 5, { align: "center" });
+    doc.text("Date", marginX + col1W * 3.5, y + 5, { align: "center" });
+    doc.text("Durée", marginX + col1W * 4.5, y + 5, { align: "center" });
 
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(11);
-    doc.text(typeInPdf === "depannage" ? "X" : "", marginX + col1W / 2, y + 11, { align: "center" });
+    doc.text(typeInPdf === "depannage" ? "X" : "", marginX + col1W * 0.5, y + 11, { align: "center" });
     doc.text(typeInPdf === "devis" ? "X" : "", marginX + col1W * 1.5, y + 11, { align: "center" });
+    doc.setFontSize(9);
+    doc.text(nacelleInPdf ? "OUI" : "NON", marginX + col1W * 2.5, y + 11, { align: "center" });
     doc.setFontSize(10);
-    doc.text(dateStr, marginX + col1W * 2.5, y + 11, { align: "center" });
-    doc.text(dureeInPdf || "", marginX + col1W * 3.5, y + 11, { align: "center" });
+    doc.text(dateStr, marginX + col1W * 3.5, y + 11, { align: "center" });
+    doc.text(dureeInPdf || "", marginX + col1W * 4.5, y + 11, { align: "center" });
 
     y += 20;
 
@@ -472,12 +489,13 @@ export default function Home() {
         dateStr, timeStr,
         clientSigDataUrl: clientSigCompressed,
         technicienSigDataUrl: techSigCompressed,
-        clientNomInPdf: "",
+        clientNomInPdf: sig.client_nom_complet || "",
         technicienNomInPdf: sig.technicien_nom || "",
         bonHtmlInPdf: sig.bon_intervention || "",
-        typeInPdf: "depannage",
+        typeInPdf: sig.type_intervention || "depannage",
         adresseInPdf: selectedClient.adresse || "",
         dureeInPdf: sig.duree_intervention || "",
+        nacelleInPdf: !!sig.nacelle,
       });
 
       pdfDoc.save(`bon-intervention-${dateStr.replace(/\//g, "-")}.pdf`);
@@ -537,6 +555,9 @@ export default function Home() {
             technicien_signature_url: techUrl,
             client_email: clientEmail.trim(),
             duree_intervention: dureeIntervention,
+            client_nom_complet: clientNomComplet.trim(),
+            type_intervention: typeIntervention,
+            nacelle: nacelle === "oui",
           })
           .eq("id", editingId);
         if (updateError) throw updateError;
@@ -549,6 +570,9 @@ export default function Home() {
           technicien_signature_url: techUrl,
           client_email: clientEmail.trim(),
           duree_intervention: dureeIntervention,
+          client_nom_complet: clientNomComplet.trim(),
+          type_intervention: typeIntervention,
+          nacelle: nacelle === "oui",
         });
         if (insertError) throw insertError;
       }
@@ -565,6 +589,7 @@ export default function Home() {
         typeInPdf: typeIntervention,
         adresseInPdf: selectedClient.adresse || "",
         dureeInPdf: dureeIntervention,
+        nacelleInPdf: nacelle === "oui",
       });
       const pdfBase64 = pdfDoc.output("datauristring").split(",")[1];
 
@@ -681,7 +706,7 @@ export default function Home() {
     });
 
     const csvContent = rows.map((r) => r.map((v) => `"${(v || "").toString().replace(/"/g, '""')}"`).join(";")).join("\n");
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["﻿" + csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -842,6 +867,18 @@ export default function Home() {
           <label style={styles.radioRow}>
             <input type="radio" checked={typeIntervention === "devis"} onChange={() => setTypeIntervention("devis")} />
             Suivant devis
+          </label>
+        </div>
+
+        <label style={styles.label}>Nacelle JDPOSE</label>
+        <div style={{ display: "flex", gap: 12 }}>
+          <label style={styles.radioRow}>
+            <input type="radio" checked={nacelle === "oui"} onChange={() => setNacelle("oui")} />
+            Oui
+          </label>
+          <label style={styles.radioRow}>
+            <input type="radio" checked={nacelle === "non"} onChange={() => setNacelle("non")} />
+            Non
           </label>
         </div>
 

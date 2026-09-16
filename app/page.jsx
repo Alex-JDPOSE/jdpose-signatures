@@ -40,9 +40,11 @@ export default function Home() {
   const [clientEmail2, setClientEmail2] = useState("");
   const [clientNomComplet, setClientNomComplet] = useState("");
   const [technicienNom, setTechnicienNom] = useState("");
-  const [typeIntervention, setTypeIntervention] = useState("depannage");
+  // Pas de valeur choisie par défaut : le technicien doit cocher lui-même, sinon
+  // la validation du bon est bloquée avec un message (voir handleValidate).
+  const [typeIntervention, setTypeIntervention] = useState("");
   const [dureeIntervention, setDureeIntervention] = useState("");
-  const [nacelle, setNacelle] = useState("non");
+  const [nacelle, setNacelle] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -136,9 +138,9 @@ export default function Home() {
     setClientNomComplet("");
     setClientEmail2("");
     setTechnicienNom("");
-    setTypeIntervention("depannage");
+    setTypeIntervention("");
     setDureeIntervention("");
-    setNacelle("non");
+    setNacelle("");
     if (clientSigRef.current) clientSigRef.current.clear();
     if (technicienSigRef.current) technicienSigRef.current.clear();
     setMessage("");
@@ -507,6 +509,7 @@ export default function Home() {
 
   const handleValidate = async () => {
     if (!selectedClient) return;
+    if (!typeIntervention || !nacelle) return setMessage("Veuillez remplir ces conditions pour valider le bon (type d'intervention et nacelle JDPOSE).");
     const bonHtml = editorRef.current ? editorRef.current.innerHTML : "";
     const bonText = editorRef.current ? editorRef.current.innerText : "";
     if (!bonText.trim()) return setMessage("Merci de remplir la désignation des travaux.");

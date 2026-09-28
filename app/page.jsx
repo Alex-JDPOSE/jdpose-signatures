@@ -150,6 +150,7 @@ export default function Home() {
     setSelectedClient(client);
     resetForm();
     setClientEmail(client.email || "");
+    setClientEmail2(client.email_secondaire || "");
     await loadPastSignatures(client.id);
   };
 
@@ -159,7 +160,7 @@ export default function Home() {
       if (editorRef.current) editorRef.current.innerHTML = sig.bon_intervention || "";
     }, 50);
     setClientEmail(sig.client_email || "");
-    setClientEmail2("");
+    setClientEmail2(sig.client_email_secondaire || "");
     setTechnicienNom(sig.technicien_nom || "");
     setClientNomComplet(sig.client_nom_complet || "");
     setTypeIntervention(sig.type_intervention || "depannage");
@@ -557,6 +558,7 @@ export default function Home() {
             technicien_nom: technicienNom.trim(),
             technicien_signature_url: techUrl,
             client_email: clientEmail.trim(),
+            client_email_secondaire: clientEmail2.trim() || null,
             duree_intervention: dureeIntervention,
             client_nom_complet: clientNomComplet.trim(),
             type_intervention: typeIntervention,
@@ -572,6 +574,7 @@ export default function Home() {
           technicien_nom: technicienNom.trim(),
           technicien_signature_url: techUrl,
           client_email: clientEmail.trim(),
+          client_email_secondaire: clientEmail2.trim() || null,
           duree_intervention: dureeIntervention,
           client_nom_complet: clientNomComplet.trim(),
           type_intervention: typeIntervention,
@@ -580,7 +583,10 @@ export default function Home() {
         if (insertError) throw insertError;
       }
 
-      await supabase.from("signature_clients").update({ email: clientEmail.trim() }).eq("id", selectedClient.id);
+      await supabase
+        .from("signature_clients")
+        .update({ email: clientEmail.trim(), email_secondaire: clientEmail2.trim() || null })
+        .eq("id", selectedClient.id);
 
       const pdfDoc = await buildPdf({
         dateStr, timeStr,

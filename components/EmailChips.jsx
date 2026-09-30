@@ -96,8 +96,12 @@ export default function EmailChips({
           ref={inputRef}
           type="email"
           inputMode="email"
-          autoComplete="email"
+          // "off" : le navigateur ne propose plus les adresses tapées sur les autres clients,
+          // seules les adresses de CE client sont suggérées (liste ci-dessous)
+          autoComplete="off"
+          autoCorrect="off"
           autoCapitalize="none"
+          spellCheck={false}
           list="email-chips-autocomplete"
           value={draft}
           onChange={handleChange}

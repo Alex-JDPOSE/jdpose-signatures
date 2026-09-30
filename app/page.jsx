@@ -980,17 +980,11 @@ export default function Home() {
           draft={emailDraft}
           setDraft={setEmailDraft}
           suggestions={emailSuggestions}
-          autocompleteList={[
-            ...new Set([
-              ...emailSuggestions,
-              ...allSignatures.flatMap((s) => splitEmails(s.client_email)),
-              ...clients.flatMap((c) => splitEmails(c.email)),
-            ]),
-          ]}
+          autocompleteList={emailSuggestions}
         />
 
         <label style={styles.label}>Email secondaire (facultatif)</label>
-        <input type="email" name="email2" autoComplete="email" value={clientEmail2} onChange={(e) => setClientEmail2(e.target.value)} placeholder="autre.contact@exemple.fr (optionnel)" style={styles.input} />
+        <input type="email" name="email2" autoComplete="off" value={clientEmail2} onChange={(e) => setClientEmail2(e.target.value)} placeholder="autre.contact@exemple.fr (optionnel)" style={styles.input} />
 
         <label style={styles.label}>Signature du client</label>
         <SignaturePad ref={clientSigRef} />

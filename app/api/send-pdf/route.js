@@ -15,12 +15,14 @@ export async function POST(request) {
       );
     }
 
-    // Liste des destinataires : email principal + email secondaire s'il est
+    // Liste des destinataires : email(s) principal(aux) + email secondaire s'il est
     // renseigné. Set() pour éviter un doublon si les deux sont identiques.
     const destinataires = [
       ...new Set(
         [email, emailSecondaire]
-          .map((e) => (e || "").trim())
+          // "email" peut contenir plusieurs adresses séparées par des virgules
+          .flatMap((e) => (e || "").split(/[,;]/))
+          .map((e) => e.trim().toLowerCase())
           .filter((e) => e.length > 0)
       ),
     ];

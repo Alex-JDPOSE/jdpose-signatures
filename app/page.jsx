@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 import SignaturePad from "../components/SignaturePad";
+import EmailChips, { splitEmails, EMAIL_REGEX } from "../components/EmailChips";
 import jsPDF from "jspdf";
 
 const LOGO_URL = "https://hzpgkwyeglxggwcqxdfo.supabase.co/storage/v1/object/public/photos/logo-JDPOSE.png";
@@ -36,7 +37,10 @@ export default function Home() {
   const recognitionRef = useRef(null);
 
   const [editingId, setEditingId] = useState(null);
-  const [clientEmail, setClientEmail] = useState("");
+  // Emails du client façon Outlook : liste d'étiquettes + texte en cours de saisie
+  const [clientEmails, setClientEmails] = useState([]);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailSuggestions, setEmailSuggestions] = useState([]);
   const [clientEmail2, setClientEmail2] = useState("");
   const [clientNomComplet, setClientNomComplet] = useState("");
   const [technicienNom, setTechnicienNom] = useState("");
@@ -86,6 +90,30 @@ export default function Home() {
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
     if (!error) setPastSignatures(data || []);
+    return error ? [] : data || [];
+  };
+
+  // Compte combien de fois chaque adresse a servi pour ce client (bons précédents)
+  const countEmailsForClient = (sigs) => {
+    const counts = {};
+    sigs.forEach((s) => {
+      splitEmails(s.client_email).forEach((e) => {
+        counts[e] = (counts[e] || 0) + 1;
+      });
+    });
+    return counts;
+  };
+
+  // Suggestions = toutes les adresses déjà utilisées pour ce client, les plus utilisées en premier
+  const refreshEmailSuggestions = (sigs, client) => {
+    const counts = countEmailsForClient(sigs);
+    const secondaire = splitEmails(client?.email_secondaire);
+    setEmailSuggestions(
+      Object.keys(counts)
+        .filter((e) => !secondaire.includes(e))
+        .sort((a, b) => counts[b] - counts[a])
+    );
+    return counts;
   };
 
   const handleCreateClient = async () => {
@@ -137,6 +165,7 @@ export default function Home() {
     if (editorRef.current) editorRef.current.innerHTML = "";
     setClientNomComplet("");
     setClientEmail2("");
+    setEmailDraft("");
     setTechnicienNom("");
     setTypeIntervention("");
     setDureeIntervention("");
@@ -149,9 +178,16 @@ export default function Home() {
   const openClient = async (client) => {
     setSelectedClient(client);
     resetForm();
-    setClientEmail(client.email || "");
     setClientEmail2(client.email_secondaire || "");
-    await loadPastSignatures(client.id);
+    const principal = splitEmails(client.email);
+    setClientEmails(principal);
+    setEmailSuggestions([]);
+    const sigs = await loadPastSignatures(client.id);
+    const counts = refreshEmailSuggestions(sigs, client);
+    // Une adresse utilisée au moins 2 fois pour ce client est remise automatiquement
+    const secondaire = splitEmails(client.email_secondaire);
+    const memorisees = Object.keys(counts).filter((e) => counts[e] >= 2 && !secondaire.includes(e));
+    setClientEmails([...new Set([...principal, ...memorisees])]);
   };
 
   const editPast = (sig) => {
@@ -159,7 +195,8 @@ export default function Home() {
     setTimeout(() => {
       if (editorRef.current) editorRef.current.innerHTML = sig.bon_intervention || "";
     }, 50);
-    setClientEmail(sig.client_email || "");
+    setClientEmails(splitEmails(sig.client_email));
+    setEmailDraft("");
     setClientEmail2(sig.client_email_secondaire || "");
     setTechnicienNom(sig.technicien_nom || "");
     setClientNomComplet(sig.client_nom_complet || "");
@@ -519,7 +556,13 @@ export default function Home() {
     if (!dureeIntervention) return setMessage("Merci de renseigner la durée de l'intervention.");
     if (technicienSigRef.current.isEmpty()) return setMessage("La signature du technicien est vide.");
     if (clientSigRef.current.isEmpty()) return setMessage("La signature du client est vide.");
-    if (!clientEmail.trim()) return setMessage("Merci de renseigner l'email du client.");
+    // On récupère aussi une adresse tapée mais pas encore transformée en étiquette
+    const draftParts = splitEmails(emailDraft);
+    const invalides = draftParts.filter((e) => !EMAIL_REGEX.test(e));
+    if (invalides.length) return setMessage(`Adresse email invalide : ${invalides.join(", ")}`);
+    const finalEmails = [...new Set([...clientEmails, ...draftParts])];
+    if (finalEmails.length === 0) return setMessage("Merci de renseigner l'email du client.");
+    const emailsJoined = finalEmails.join(", ");
 
     setSaving(true);
     setMessage("");
@@ -557,7 +600,7 @@ export default function Home() {
             signature_url: clientUrl,
             technicien_nom: technicienNom.trim(),
             technicien_signature_url: techUrl,
-            client_email: clientEmail.trim(),
+            client_email: emailsJoined,
             client_email_secondaire: clientEmail2.trim() || null,
             duree_intervention: dureeIntervention,
             client_nom_complet: clientNomComplet.trim(),
@@ -573,7 +616,7 @@ export default function Home() {
           signature_url: clientUrl,
           technicien_nom: technicienNom.trim(),
           technicien_signature_url: techUrl,
-          client_email: clientEmail.trim(),
+          client_email: emailsJoined,
           client_email_secondaire: clientEmail2.trim() || null,
           duree_intervention: dureeIntervention,
           client_nom_complet: clientNomComplet.trim(),
@@ -585,7 +628,7 @@ export default function Home() {
 
       await supabase
         .from("signature_clients")
-        .update({ email: clientEmail.trim(), email_secondaire: clientEmail2.trim() || null })
+        .update({ email: finalEmails[0], email_secondaire: clientEmail2.trim() || null })
         .eq("id", selectedClient.id);
 
       const pdfDoc = await buildPdf({
@@ -606,7 +649,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: clientEmail.trim(),
+          email: emailsJoined,
           emailSecondaire: clientEmail2.trim(),
           clientNom: selectedClient.nom,
           dateStr, timeStr, pdfBase64,
@@ -616,7 +659,9 @@ export default function Home() {
 
       setMessage(editingId ? "Bon modifié et renvoyé ✅" : "Bon signé et envoyé par email ✅");
       resetForm();
-      await loadPastSignatures(selectedClient.id);
+      setClientEmails(finalEmails);
+      const newSigs = await loadPastSignatures(selectedClient.id);
+      refreshEmailSuggestions(newSigs, selectedClient);
     } catch (err) {
       console.error(err);
       setMessage("Erreur lors de l'enregistrement ou de l'envoi ❌");
@@ -928,8 +973,21 @@ export default function Home() {
         <label style={styles.label}>Nom complet du client (Nom + Prénom)</label>
         <input type="text" value={clientNomComplet} onChange={(e) => setClientNomComplet(e.target.value)} placeholder="Nom et prénom" style={styles.input} />
 
-        <label style={styles.label}>Email du client</label>
-        <input type="email" name="email" autoComplete="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="client@exemple.fr" style={styles.input} />
+        <label style={styles.label}>Email(s) du client</label>
+        <EmailChips
+          emails={clientEmails}
+          setEmails={setClientEmails}
+          draft={emailDraft}
+          setDraft={setEmailDraft}
+          suggestions={emailSuggestions}
+          autocompleteList={[
+            ...new Set([
+              ...emailSuggestions,
+              ...allSignatures.flatMap((s) => splitEmails(s.client_email)),
+              ...clients.flatMap((c) => splitEmails(c.email)),
+            ]),
+          ]}
+        />
 
         <label style={styles.label}>Email secondaire (facultatif)</label>
         <input type="email" name="email2" autoComplete="email" value={clientEmail2} onChange={(e) => setClientEmail2(e.target.value)} placeholder="autre.contact@exemple.fr (optionnel)" style={styles.input} />

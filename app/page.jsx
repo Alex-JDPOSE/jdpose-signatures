@@ -24,6 +24,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [newClientNom, setNewClientNom] = useState("");
   const [newClientAdresse, setNewClientAdresse] = useState("");
+  // Destinataires des bons enregistrés dans le dossier (création / modification du client)
+  const [newClientEmails, setNewClientEmails] = useState([]);
+  const [newClientEmailDraft, setNewClientEmailDraft] = useState("");
+  const [editClientEmailDraft, setEditClientEmailDraft] = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
   const [pastSignatures, setPastSignatures] = useState([]);
   const [editingClient, setEditingClient] = useState(null);
@@ -43,7 +47,6 @@ export default function Home() {
   const [clientEmails, setClientEmails] = useState([]);
   const [emailDraft, setEmailDraft] = useState("");
   const [emailSuggestions, setEmailSuggestions] = useState([]);
-  const [clientEmail2, setClientEmail2] = useState("");
   const [clientNomComplet, setClientNomComplet] = useState("");
   const [technicienNom, setTechnicienNom] = useState("");
   // Pas de valeur choisie par défaut : le technicien doit cocher lui-même, sinon
@@ -106,28 +109,64 @@ export default function Home() {
     return counts;
   };
 
-  // Suggestions = toutes les adresses déjà utilisées pour ce client, les plus utilisées en premier
-  const refreshEmailSuggestions = (sigs, client) => {
+  // Destinataires enregistrés dans le dossier du client (colonne "email", adresses séparées par des virgules).
+  // L'ancien "email secondaire" est repris automatiquement dans la liste.
+  const clientDestinataires = (client) => [
+    ...new Set([...splitEmails(client?.email), ...splitEmails(client?.email_secondaire)]),
+  ];
+
+  // Suggestions = adresses déjà utilisées sur les bons de CE client uniquement, les plus utilisées en premier
+  const refreshEmailSuggestions = (sigs) => {
     const counts = countEmailsForClient(sigs);
-    const secondaire = splitEmails(client?.email_secondaire);
-    setEmailSuggestions(
-      Object.keys(counts)
-        .filter((e) => !secondaire.includes(e))
-        .sort((a, b) => counts[b] - counts[a])
-    );
-    return counts;
+    setEmailSuggestions(Object.keys(counts).sort((a, b) => counts[b] - counts[a]));
+  };
+
+  // Complète la liste avec une adresse tapée mais pas encore transformée en étiquette
+  const withDraft = (emails, draft) => {
+    const parts = splitEmails(draft);
+    const invalides = parts.filter((e) => !EMAIL_REGEX.test(e));
+    return { list: [...new Set([...emails, ...parts])], invalides };
+  };
+
+  // Enregistre la liste des destinataires dans le dossier du client
+  const saveClientDestinataires = async (clientId, emails) => {
+    const value = emails.length ? emails.join(", ") : null;
+    const { error } = await supabase
+      .from("signature_clients")
+      .update({ email: value, email_secondaire: null })
+      .eq("id", clientId);
+    if (error) throw error;
+    setClients((prev) => prev.map((c) => (c.id === clientId ? { ...c, email: value, email_secondaire: null } : c)));
+    setSelectedClient((prev) => (prev && prev.id === clientId ? { ...prev, email: value, email_secondaire: null } : prev));
+  };
+
+  // ☆ sur une étiquette du bon : ajoute l'adresse au dossier de ce client
+  const handleSaveEmailToClient = async (email) => {
+    if (!selectedClient) return;
+    const next = [...new Set([...clientDestinataires(selectedClient), email])];
+    try {
+      await saveClientDestinataires(selectedClient.id, next);
+      setMessage(`${email} est enregistrée pour ${selectedClient.nom} ✅`);
+    } catch (err) {
+      console.error(err);
+      setMessage("Impossible d'enregistrer l'adresse dans le dossier ❌");
+    }
   };
 
   const handleCreateClient = async () => {
     if (!newClientNom.trim()) return;
+    const { list, invalides } = withDraft(newClientEmails, newClientEmailDraft);
+    if (invalides.length) return alert(`Adresse email invalide : ${invalides.join(", ")}`);
     const { data, error } = await supabase
       .from("signature_clients")
-      .insert({ nom: newClientNom.trim(), adresse: newClientAdresse.trim() || null })
+      .insert({ nom: newClientNom.trim(), adresse: newClientAdresse.trim() || null, email: list.length ? list.join(", ") : null })
       .select()
       .single();
     if (!error) {
       setNewClientNom("");
       setNewClientAdresse("");
+      setNewClientEmails([]);
+      setNewClientEmailDraft("");
       setClients((prev) => [data, ...prev]);
       setShowNewClientForm(false);
     }
@@ -147,15 +186,20 @@ export default function Home() {
 
   const handleEditClient = async () => {
     if (!editingClient.nom.trim()) return;
+    const { list, invalides } = withDraft(editingClient.destinataires || [], editClientEmailDraft);
+    if (invalides.length) return alert(`Adresse email invalide : ${invalides.join(", ")}`);
+    const email = list.length ? list.join(", ") : null;
     try {
-      await supabase
+      const { error } = await supabase
         .from("signature_clients")
-        .update({ nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null })
+        .update({ nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null, email, email_secondaire: null })
         .eq("id", editingClient.id);
+      if (error) throw error;
       setClients((prev) =>
-        prev.map((c) => (c.id === editingClient.id ? { ...c, nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null } : c))
+        prev.map((c) => (c.id === editingClient.id ? { ...c, nom: editingClient.nom.trim(), adresse: editingClient.adresse?.trim() || null, email, email_secondaire: null } : c))
       );
       setEditingClient(null);
+      setEditClientEmailDraft("");
     } catch (err) {
       console.error(err);
       alert("Erreur lors de la modification");
@@ -166,7 +210,6 @@ export default function Home() {
     setEditingId(null);
     if (editorRef.current) editorRef.current.innerHTML = "";
     setClientNomComplet("");
-    setClientEmail2("");
     setEmailDraft("");
     setTechnicienNom("");
     setTypeIntervention("");
@@ -180,16 +223,11 @@ export default function Home() {
   const openClient = async (client) => {
     setSelectedClient(client);
     resetForm();
-    setClientEmail2(client.email_secondaire || "");
-    const principal = splitEmails(client.email);
-    setClientEmails(principal);
+    // Les destinataires enregistrés dans le dossier de ce client sont pré-remplis
+    setClientEmails(clientDestinataires(client));
     setEmailSuggestions([]);
     const sigs = await loadPastSignatures(client.id);
-    const counts = refreshEmailSuggestions(sigs, client);
-    // Une adresse utilisée au moins 2 fois pour ce client est remise automatiquement
-    const secondaire = splitEmails(client.email_secondaire);
-    const memorisees = Object.keys(counts).filter((e) => counts[e] >= 2 && !secondaire.includes(e));
-    setClientEmails([...new Set([...principal, ...memorisees])]);
+    refreshEmailSuggestions(sigs);
   };
 
   const editPast = (sig) => {
@@ -197,9 +235,8 @@ export default function Home() {
     setTimeout(() => {
       if (editorRef.current) editorRef.current.innerHTML = sig.bon_intervention || "";
     }, 50);
-    setClientEmails(splitEmails(sig.client_email));
+    setClientEmails([...new Set([...splitEmails(sig.client_email), ...splitEmails(sig.client_email_secondaire)])]);
     setEmailDraft("");
-    setClientEmail2(sig.client_email_secondaire || "");
     setTechnicienNom(sig.technicien_nom || "");
     setClientNomComplet(sig.client_nom_complet || "");
     setTypeIntervention(sig.type_intervention || "depannage");
@@ -603,7 +640,7 @@ export default function Home() {
             technicien_nom: technicienNom.trim(),
             technicien_signature_url: techUrl,
             client_email: emailsJoined,
-            client_email_secondaire: clientEmail2.trim() || null,
+            client_email_secondaire: null,
             duree_intervention: dureeIntervention,
             client_nom_complet: clientNomComplet.trim(),
             type_intervention: typeIntervention,
@@ -619,7 +656,7 @@ export default function Home() {
           technicien_nom: technicienNom.trim(),
           technicien_signature_url: techUrl,
           client_email: emailsJoined,
-          client_email_secondaire: clientEmail2.trim() || null,
+          client_email_secondaire: null,
           duree_intervention: dureeIntervention,
           client_nom_complet: clientNomComplet.trim(),
           type_intervention: typeIntervention,
@@ -627,11 +664,6 @@ export default function Home() {
         });
         if (insertError) throw insertError;
       }
-
-      await supabase
-        .from("signature_clients")
-        .update({ email: finalEmails[0], email_secondaire: clientEmail2.trim() || null })
-        .eq("id", selectedClient.id);
 
       const pdfDoc = await buildPdf({
         dateStr, timeStr,
@@ -652,7 +684,6 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: emailsJoined,
-          emailSecondaire: clientEmail2.trim(),
           clientNom: selectedClient.nom,
           dateStr, timeStr, pdfBase64,
         }),
@@ -663,7 +694,7 @@ export default function Home() {
       resetForm();
       setClientEmails(finalEmails);
       const newSigs = await loadPastSignatures(selectedClient.id);
-      refreshEmailSuggestions(newSigs, selectedClient);
+      refreshEmailSuggestions(newSigs);
     } catch (err) {
       console.error(err);
       setMessage("Erreur lors de l'enregistrement ou de l'envoi ❌");
@@ -883,7 +914,7 @@ export default function Home() {
     return (
       <div style={{ maxWidth: 700, margin: "0 auto", padding: 20 }}>
         <Logo />
-        <button onClick={() => setEditingClient(null)} style={styles.backBtn}>← Annuler</button>
+        <button onClick={() => { setEditingClient(null); setEditClientEmailDraft(""); }} style={styles.backBtn}>← Annuler</button>
         <h1 style={styles.title}>Modifier le dossier</h1>
 
         <label style={styles.label}>Nom du client / chantier</label>
@@ -891,6 +922,21 @@ export default function Home() {
 
         <label style={styles.label}>Adresse</label>
         <textarea value={editingClient.adresse || ""} onChange={(e) => setEditingClient({ ...editingClient, adresse: e.target.value })} placeholder="Rue, ville, code postal..." rows={3} style={styles.textarea} />
+
+        <label style={styles.label}>Destinataires des bons</label>
+        <EmailChips
+          emails={editingClient.destinataires || []}
+          setEmails={(updater) =>
+            setEditingClient((prev) => ({
+              ...prev,
+              destinataires: typeof updater === "function" ? updater(prev.destinataires || []) : updater,
+            }))
+          }
+          draft={editClientEmailDraft}
+          setDraft={setEditClientEmailDraft}
+          datalistId="email-chips-edit-client"
+          placeholder="contact@client.fr"
+        />
 
         <button onClick={handleEditClient} style={styles.validateBtn}>Enregistrer</button>
       </div>
@@ -992,10 +1038,9 @@ export default function Home() {
           setDraft={setEmailDraft}
           suggestions={emailSuggestions}
           autocompleteList={emailSuggestions}
+          savedEmails={clientDestinataires(selectedClient)}
+          onSaveEmail={handleSaveEmailToClient}
         />
-
-        <label style={styles.label}>Email secondaire (facultatif)</label>
-        <input type="email" name="email2" autoComplete="off" value={clientEmail2} onChange={(e) => setClientEmail2(e.target.value)} placeholder="autre.contact@exemple.fr (optionnel)" style={styles.input} />
 
         <label style={styles.label}>Signature du client</label>
         <SignaturePad ref={clientSigRef} />
@@ -1042,8 +1087,17 @@ export default function Home() {
         <div style={styles.newClientBlock}>
           <input type="text" placeholder="Nom du client / chantier" value={newClientNom} onChange={(e) => setNewClientNom(e.target.value)} style={styles.input} />
           <textarea placeholder="Adresse (rue, ville, code postal...)" value={newClientAdresse} onChange={(e) => setNewClientAdresse(e.target.value)} rows={2} style={{ ...styles.textarea, marginTop: 8 }} />
+          <label style={{ ...styles.label, margin: "10px 0 6px" }}>Destinataires des bons (facultatif)</label>
+          <EmailChips
+            emails={newClientEmails}
+            setEmails={setNewClientEmails}
+            draft={newClientEmailDraft}
+            setDraft={setNewClientEmailDraft}
+            datalistId="email-chips-new-client"
+            placeholder="contact@client.fr"
+          />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={() => { setShowNewClientForm(false); setNewClientNom(""); setNewClientAdresse(""); }} style={{ ...styles.actionBtn, flex: 1 }}>Annuler</button>
+            <button onClick={() => { setShowNewClientForm(false); setNewClientNom(""); setNewClientAdresse(""); setNewClientEmails([]); setNewClientEmailDraft(""); }} style={{ ...styles.actionBtn, flex: 1 }}>Annuler</button>
             <button onClick={handleCreateClient} style={{ ...styles.addBtn, flex: 2 }}>+ Créer le dossier</button>
           </div>
         </div>
@@ -1099,7 +1153,7 @@ export default function Home() {
                   {c.adresse && <span style={{ display: "block", fontSize: 12, color: "#888", marginTop: 2 }}>{c.adresse}</span>}
                 </button>
                 <div style={{ display: "flex", gap: 4 }}>
-                  <button onClick={() => setEditingClient({ ...c })} style={styles.actionBtn} title="Modifier">✏️</button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditClientEmailDraft(""); setEditingClient({ ...c, destinataires: clientDestinataires(c) }); }} style={styles.actionBtn} title="Modifier">✏️</button>
                   <button onClick={(e) => handleDeleteClient(c, e)} style={styles.deleteBtn} title="Supprimer">✕</button>
                 </div>
               </div>

@@ -24,6 +24,10 @@ export default function EmailChips({
   suggestions = [],
   autocompleteList = [],
   placeholder = "client@exemple.fr",
+  savedEmails = null, // adresses enregistrées dans le dossier du client (⭐)
+  onSaveEmail = null, // tap sur ☆ = enregistre l'adresse dans le dossier du client
+  datalistId = "email-chips-autocomplete",
+  suggestLabel = "Déjà utilisées pour ce client :",
 }) {
   const inputRef = useRef(null);
 
@@ -78,6 +82,24 @@ export default function EmailChips({
       <div style={styles.box} onClick={() => inputRef.current && inputRef.current.focus()}>
         {emails.map((email) => (
           <span key={email} style={styles.chip}>
+            {onSaveEmail && savedEmails && (
+              savedEmails.includes(email) ? (
+                <span title="Enregistrée dans le dossier du client" style={styles.star}>⭐</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSaveEmail(email);
+                  }}
+                  style={styles.starBtn}
+                  title="Enregistrer cette adresse dans le dossier du client"
+                  aria-label={`Enregistrer ${email} pour ce client`}
+                >
+                  ☆
+                </button>
+              )
+            )}
             {email}
             <button
               type="button"
@@ -102,7 +124,7 @@ export default function EmailChips({
           autoCorrect="off"
           autoCapitalize="none"
           spellCheck={false}
-          list="email-chips-autocomplete"
+          list={datalistId}
           value={draft}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
@@ -111,7 +133,7 @@ export default function EmailChips({
           placeholder={emails.length === 0 ? placeholder : "Ajouter une adresse…"}
           style={styles.input}
         />
-        <datalist id="email-chips-autocomplete">
+        <datalist id={datalistId}>
           {autocompleteList
             .filter((a) => !emails.includes(a))
             .map((a) => (
@@ -120,11 +142,14 @@ export default function EmailChips({
         </datalist>
       </div>
 
-      <p style={styles.hint}>Sépare les adresses par une virgule pour en mettre plusieurs.</p>
+      <p style={styles.hint}>
+        Sépare les adresses par une virgule pour en mettre plusieurs.
+        {onSaveEmail && " Touche ☆ pour enregistrer une adresse dans le dossier du client."}
+      </p>
 
       {visibleSuggestions.length > 0 && (
         <div style={styles.suggestRow}>
-          <span style={styles.suggestLabel}>Déjà utilisées pour ce client :</span>
+          <span style={styles.suggestLabel}>{suggestLabel}</span>
           {visibleSuggestions.map((s) => (
             <button
               key={s}
@@ -186,6 +211,16 @@ const styles = {
     fontSize: 15,
     padding: "6px 4px",
     background: "transparent",
+  },
+  star: { fontSize: 13, marginRight: 2 },
+  starBtn: {
+    border: "none",
+    background: "transparent",
+    color: "#2f6fed",
+    fontSize: 16,
+    lineHeight: 1,
+    cursor: "pointer",
+    padding: "0 2px",
   },
   hint: { fontSize: 12, color: "#888", margin: "4px 0 0" },
   suggestRow: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6 },

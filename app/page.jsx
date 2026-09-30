@@ -15,7 +15,9 @@ const TEXT_COLORS = [
   { label: "Vert", hex: "#2f9e44" },
 ];
 
-const DUREE_OPTIONS = ["30 min", "1h", "1h30", "2h", "2h30", "3h", "3h30", "4h", "4h30", "5h", "5h30", "6h"];
+const DUREE_OPTIONS = ["30 min", "1h", "1h30", "2h", "2h30", "3h", "3h30", "4h", "4h30", "5h", "5h30", "6h", "6h30", "7h", "7h30", "8h"];
+
+const TECHNICIENS = ["Jérôme", "Jacky CHAMPEVAL"];
 
 export default function Home() {
   const [clients, setClients] = useState([]);
@@ -965,7 +967,16 @@ export default function Home() {
         <div ref={editorRef} contentEditable suppressContentEditableWarning style={styles.editor} data-placeholder="Décrivez précisément l'intervention réalisée..." />
 
         <label style={styles.label}>Nom du technicien</label>
-        <input type="text" value={technicienNom} onChange={(e) => setTechnicienNom(e.target.value)} placeholder="Nom du technicien" style={styles.input} />
+        <select value={technicienNom} onChange={(e) => setTechnicienNom(e.target.value)} style={styles.input}>
+          <option value="">— Choisir le technicien —</option>
+          {TECHNICIENS.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+          {/* Si un ancien bon a un autre nom, on l'affiche quand même pour ne pas le perdre en modification */}
+          {technicienNom && !TECHNICIENS.includes(technicienNom) && (
+            <option value={technicienNom}>{technicienNom}</option>
+          )}
+        </select>
 
         <label style={styles.label}>Signature du technicien</label>
         <SignaturePad ref={technicienSigRef} />

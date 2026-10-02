@@ -30,6 +30,8 @@ export async function POST(request) {
     const { data, error } = await resend.emails.send({
       from: "JDPOSE <contact@jdpose.fr>", // doit être un domaine vérifié dans Resend
       to: destinataires,
+      // Copie cachée de chaque bon envoyé (le client ne la voit pas)
+      bcc: "i.danthony@jdpose.fr",
       subject: `Bon d'intervention - ${clientNom} - ${dateStr}`,
       html: `
         <p>Bonjour,</p>
